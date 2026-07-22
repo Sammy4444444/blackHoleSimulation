@@ -42,7 +42,7 @@ SimulationOfBlackHole/
 - Git (for FetchContent dependencies)
 - OpenGL 3.3+ capable GPU
 
-## Build (Visual Studio 2022)
+## Build (Visual Studio 2026)
 
 From the project root:
 
