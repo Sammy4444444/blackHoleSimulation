@@ -1,4 +1,4 @@
-# Black Hole Simulator
+# Black Hole Simulator ITS NOT DONE YET
 
 A long-term C++ project for real-time 3D visualization of black hole physics: event horizon, Schwarzschild radius, photon sphere, accretion disk, gravitational lensing, and relativistic effects.
 
