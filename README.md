@@ -37,7 +37,7 @@ SimulationOfBlackHole/
 ## Requirements
 
 - Windows 11
-- Visual Studio 2022 (Desktop development with C++)
+- Visual Studio 2026 (Desktop development with C++)
 - CMake 3.20+
 - Git (for FetchContent dependencies)
 - OpenGL 3.3+ capable GPU
