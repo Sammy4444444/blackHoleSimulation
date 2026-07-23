@@ -1,6 +1,7 @@
 #include "Rendering/Primitives.h"
 
 #include <cmath>
+#include <random>
 
 namespace bhs::rendering {
 
@@ -95,6 +96,38 @@ namespace bhs::rendering {
                     data.indices.push_back(bottomLeft);
                 }
             }
+        }
+
+        return data;
+    }
+
+    MeshData createStarfieldData(int count, float radius, unsigned int seed) {
+        MeshData data;
+        data.vertices.reserve(static_cast<size_t>(count) * 3);
+        // Points have no shared-vertex topology, so no indices are generated —
+        // Mesh::upload() detects the empty index buffer and skips the EBO.
+
+        std::mt19937 rng(seed);
+        std::uniform_real_distribution<float> unit(0.0f, 1.0f);
+
+        for (int i = 0; i < count; ++i) {
+            // Correct uniform-sphere-surface sampling via the inverse-transform
+            // method: z is uniform in [-1, 1] and theta is uniform in [0, 2*pi],
+            // with the ring radius derived from z. Naive uniform latitude/
+            // longitude angles would visibly clump points near the poles.
+            const float u = unit(rng);
+            const float v = unit(rng);
+
+            const float z = 1.0f - 2.0f * u;
+            const float ringRadius = std::sqrt(std::max(0.0f, 1.0f - z * z));
+            const float theta = 2.0f * kPi * v;
+
+            const float x = ringRadius * std::cos(theta);
+            const float y = ringRadius * std::sin(theta);
+
+            data.vertices.push_back(radius * x);
+            data.vertices.push_back(radius * z);
+            data.vertices.push_back(radius * y);
         }
 
         return data;

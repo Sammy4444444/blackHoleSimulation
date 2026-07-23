@@ -14,11 +14,14 @@ namespace bhs::rendering {
         : m_vao(other.m_vao)
         , m_vbo(other.m_vbo)
         , m_ebo(other.m_ebo)
-        , m_indexCount(other.m_indexCount) {
+        , m_indexCount(other.m_indexCount)
+        , m_vertexCount(other.m_vertexCount)
+        , m_primitiveType(other.m_primitiveType) {
         other.m_vao = 0;
         other.m_vbo = 0;
         other.m_ebo = 0;
         other.m_indexCount = 0;
+        other.m_vertexCount = 0;
     }
 
     Mesh& Mesh::operator=(Mesh&& other) noexcept {
@@ -29,23 +32,27 @@ namespace bhs::rendering {
             m_vbo = other.m_vbo;
             m_ebo = other.m_ebo;
             m_indexCount = other.m_indexCount;
+            m_vertexCount = other.m_vertexCount;
+            m_primitiveType = other.m_primitiveType;
 
             other.m_vao = 0;
             other.m_vbo = 0;
             other.m_ebo = 0;
             other.m_indexCount = 0;
+            other.m_vertexCount = 0;
         }
         return *this;
     }
 
-    void Mesh::upload(const MeshData& data) {
+    void Mesh::upload(const MeshData& data, unsigned int primitiveType) {
         release();
 
+        m_primitiveType = primitiveType;
         m_indexCount = static_cast<int>(data.indices.size());
+        m_vertexCount = static_cast<int>(data.vertices.size() / 3);
 
         glGenVertexArrays(1, &m_vao);
         glGenBuffers(1, &m_vbo);
-        glGenBuffers(1, &m_ebo);
 
         glBindVertexArray(m_vao);
 
@@ -53,9 +60,15 @@ namespace bhs::rendering {
         glBufferData(GL_ARRAY_BUFFER, data.vertices.size() * sizeof(float),
             data.vertices.data(), GL_STATIC_DRAW);
 
-        glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, m_ebo);
-        glBufferData(GL_ELEMENT_ARRAY_BUFFER, data.indices.size() * sizeof(unsigned int),
-            data.indices.data(), GL_STATIC_DRAW);
+        // Non-indexed geometry (e.g. a point cloud with no shared-vertex
+        // topology) has no valid index buffer to build; skip the EBO entirely
+        // rather than manufacturing a throwaway identity one.
+        if (!data.indices.empty()) {
+            glGenBuffers(1, &m_ebo);
+            glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, m_ebo);
+            glBufferData(GL_ELEMENT_ARRAY_BUFFER, data.indices.size() * sizeof(unsigned int),
+                data.indices.data(), GL_STATIC_DRAW);
+        }
 
         glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 3 * sizeof(float), nullptr);
         glEnableVertexAttribArray(0);
@@ -77,6 +90,7 @@ namespace bhs::rendering {
             m_vao = 0;
         }
         m_indexCount = 0;
+        m_vertexCount = 0;
     }
 
     void Mesh::bind() const {
@@ -89,7 +103,11 @@ namespace bhs::rendering {
 
     void Mesh::draw() const {
         bind();
-        glDrawElements(GL_TRIANGLES, m_indexCount, GL_UNSIGNED_INT, nullptr);
+        if (m_ebo != 0) {
+            glDrawElements(m_primitiveType, m_indexCount, GL_UNSIGNED_INT, nullptr);
+        } else {
+            glDrawArrays(m_primitiveType, 0, m_vertexCount);
+        }
         unbind();
     }
 

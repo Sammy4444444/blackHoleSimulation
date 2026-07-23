@@ -20,6 +20,7 @@ namespace bhs::rendering {
         glEnable(GL_CULL_FACE);
         glCullFace(GL_BACK);
         glFrontFace(GL_CCW);
+        glEnable(GL_PROGRAM_POINT_SIZE);
     }
 
     void OpenGLContext::logInfo() {

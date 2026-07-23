@@ -27,6 +27,8 @@ namespace bhs::rendering {
         Shader m_shader;
         Mesh m_cubeMesh;
         Mesh m_sphereMesh;
+        Shader m_starShader;
+        Mesh m_starMesh;
         bool m_useCube = false;
         bool m_initialized = false;
     };

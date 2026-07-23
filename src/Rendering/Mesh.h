@@ -15,7 +15,10 @@ namespace bhs::rendering {
         Mesh& operator=(Mesh&& other) noexcept;
 
         // Creates (or replaces) the GPU buffers from CPU-side geometry data.
-        void upload(const MeshData& data);
+        // primitiveType defaults to GL_TRIANGLES so existing call sites are
+        // unaffected. If data.indices is empty, no EBO is created and draw()
+        // issues glDrawArrays instead of glDrawElements.
+        void upload(const MeshData& data, unsigned int primitiveType = 0x0004 /* GL_TRIANGLES */);
 
         // Releases the GPU buffers immediately. Safe to call multiple times.
         void release();
@@ -23,7 +26,8 @@ namespace bhs::rendering {
         void bind() const;
         void unbind() const;
 
-        // Binds and issues the indexed draw call.
+        // Binds and issues the draw call (indexed or non-indexed, depending on
+        // whether an EBO was created in upload()).
         void draw() const;
 
     private:
@@ -31,6 +35,8 @@ namespace bhs::rendering {
         unsigned int m_vbo = 0;
         unsigned int m_ebo = 0;
         int m_indexCount = 0;
+        int m_vertexCount = 0;
+        unsigned int m_primitiveType = 0x0004 /* GL_TRIANGLES */;
     };
 
 } // namespace bhs::rendering
