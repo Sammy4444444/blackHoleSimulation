@@ -24,6 +24,8 @@ set(BHS_SOURCES
     src/Core/Timer.cpp
     src/Rendering/OpenGLContext.cpp
     src/Rendering/Shader.cpp
+    src/Rendering/Mesh.cpp
+    src/Rendering/Primitives.cpp
     src/Rendering/Renderer.cpp
     src/Camera/Camera.cpp
     src/Camera/CameraController.cpp

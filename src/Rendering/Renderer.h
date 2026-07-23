@@ -1,35 +1,34 @@
 #pragma once
 
+#include "Rendering/Mesh.h"
 #include "Rendering/Shader.h"
 
-#include <vector>
-
 namespace bhs::camera {
-class Camera;
+    class Camera;
 }
 
 namespace bhs::rendering {
 
-class Renderer {
-public:
-    static Renderer& instance();
+    class Renderer {
+    public:
+        static Renderer& instance();
 
-    void initialize();
-    void shutdown();
-    void render(const camera::Camera& camera);
+        void initialize();
+        void shutdown();
+        void render(const camera::Camera& camera);
 
-private:
-    Renderer() = default;
+        // Debug aid: switches the rendered reference shape between the cube and
+        // the UV sphere. Defaults to the sphere once both meshes exist.
+        void setDebugCube(bool useCube) { m_useCube = useCube; }
 
-    void createSceneGeometry();
-    void destroySceneGeometry();
+    private:
+        Renderer() = default;
 
-    Shader m_shader;
-    unsigned int m_vao = 0;
-    unsigned int m_vbo = 0;
-    unsigned int m_ebo = 0;
-    int m_indexCount = 0;
-    bool m_initialized = false;
-};
+        Shader m_shader;
+        Mesh m_cubeMesh;
+        Mesh m_sphereMesh;
+        bool m_useCube = false;
+        bool m_initialized = false;
+    };
 
 } // namespace bhs::rendering
