@@ -1,4 +1,4 @@
-# 🌌 Black Hole Simulator (Educational Project)
+# 🌌 Simulation Of BlackHole (Educational Project)
 
 > An educational C++ and OpenGL project that builds a black hole simulator from first principles.
 
