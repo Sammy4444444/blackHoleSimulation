@@ -17,7 +17,7 @@ namespace bhs::rendering {
         return renderer;
     }
 
-    void Renderer::initialize() {
+    void Renderer::initialize(float eventHorizonRadius) {
         if (m_initialized) {
             return;
         }
@@ -30,6 +30,12 @@ namespace bhs::rendering {
 
         m_starShader.loadFromFiles("assets/shaders/star.vert", "assets/shaders/star.frag");
         m_starMesh.upload(createStarfieldData(), GL_POINTS);
+
+        // Event horizon: reuses the existing basic shader/mesh pipeline.
+        // Viewed from outside without lensing, an event horizon is
+        // indistinguishable from a flat black sphere (it absorbs everything);
+        // gravitational lensing is a separate future roadmap item.
+        m_horizonMesh.upload(createUVSphereData(eventHorizonRadius));
 
         m_initialized = true;
 
@@ -44,6 +50,7 @@ namespace bhs::rendering {
         m_cubeMesh.release();
         m_sphereMesh.release();
         m_starMesh.release();
+        m_horizonMesh.release();
         m_initialized = false;
     }
 
@@ -107,6 +114,10 @@ namespace bhs::rendering {
 
         const Mesh& activeMesh = m_useCube ? m_cubeMesh : m_sphereMesh;
         activeMesh.draw();
+
+        // Event horizon: opaque black sphere, same shader/model matrix.
+        glUniform3f(colorLoc, 0.0f, 0.0f, 0.0f);
+        m_horizonMesh.draw();
 
         m_shader.unbind();
     }

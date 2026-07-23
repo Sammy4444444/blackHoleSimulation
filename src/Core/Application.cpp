@@ -49,12 +49,12 @@ void Application::initialize() {
     m_window = new Window(1600, 900, "Black Hole Simulator");
     rendering::OpenGLContext::initialize(m_window->handle());
 
-    rendering::Renderer::instance().initialize();
+    physics::PhysicsWorld::instance().initialize();
+
+    rendering::Renderer::instance().initialize(physics::PhysicsWorld::instance().schwarzschildRadius());
     ui::ImGuiLayer::instance().initialize(m_window->handle());
 
     camera::CameraController::instance().initialize(m_window->handle());
-
-    physics::PhysicsWorld::instance().initialize();
 
     m_running = true;
     Log::info("Initialization complete.");
