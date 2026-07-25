@@ -4,6 +4,7 @@
 #include "Core/Log.h"
 #include "Core/Timer.h"
 #include "Physics/PhysicsWorld.h"
+#include "Rendering/Renderer.h"
 
 #include <imgui.h>
 #include <backends/imgui_impl_glfw.h>
@@ -72,7 +73,7 @@ void ImGuiLayer::render() {
     const auto& camera = camera::CameraController::instance().camera();
     const ImGuiIO& io = ImGui::GetIO();
 
-    ImGui::Begin("Debug");
+    ImGui::Begin("Debug", nullptr, ImGuiWindowFlags_AlwaysAutoResize);
     ImGui::Text("Black Hole Simulator - Foundation Build");
     ImGui::Separator();
     ImGui::Text("FPS: %.1f", io.Framerate);
@@ -92,6 +93,31 @@ void ImGuiLayer::render() {
     ImGui::Text("Event Horizon Rs: %.2f", schwarzschildRadius);
     ImGui::Text("Photon Sphere Rp: %.2f", photonSphereRadius);
     ImGui::Text("Rp / Rs: %.2f", photonSphereRadius / schwarzschildRadius);
+    ImGui::Separator();
+    ImGui::Text("Milestone 5: Gravitational Lensing");
+    {
+        auto& renderer = rendering::Renderer::instance();
+        bool lensingEnabled = renderer.lensingEnabled();
+        if (ImGui::Checkbox("Enable Lensing Pass (Schwarzschild geodesic lensing)", &lensingEnabled)) {
+            renderer.setLensingEnabled(lensingEnabled);
+        }
+
+        // Diagnostic selector, still useful for isolating pipeline stages
+        // from lensing-physics correctness: prove the branch executes
+        // (flat color) / ray reconstruction is sane (raw direction) /
+        // trust the real lensed cubemap sample (normal).
+        if (lensingEnabled) {
+            static const char* kModes[] = {
+                "0: Normal (Schwarzschild geodesic lensing)",
+                "1: Diagnostic - flat magenta",
+                "2: Diagnostic - raw ray direction as RGB"
+            };
+            int debugMode = renderer.lensingDebugMode();
+            if (ImGui::Combo("Lensing debug mode", &debugMode, kModes, 3)) {
+                renderer.setLensingDebugMode(debugMode);
+            }
+        }
+    }
     ImGui::Separator();
     ImGui::Text("Controls");
     ImGui::BulletText("W/A/S/D - move");

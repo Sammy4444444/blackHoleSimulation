@@ -27,6 +27,8 @@ set(BHS_SOURCES
     src/Rendering/Mesh.cpp
     src/Rendering/Primitives.cpp
     src/Rendering/Renderer.cpp
+    src/Rendering/Framebuffer.cpp
+    src/Rendering/EnvironmentBaker.cpp
     src/Camera/Camera.cpp
     src/Camera/CameraController.cpp
     src/UI/ImGuiLayer.cpp
