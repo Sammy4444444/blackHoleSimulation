@@ -36,8 +36,8 @@ Instead of jumping directly into advanced visual effects, every feature is imple
 | ✅ Milestone 1 | Rendering Pipeline & Procedural UV Sphere | Complete |
 | ✅ Milestone 2 | Procedural Starfield | Complete |
 | ✅ Milestone 3 | Event Horizon (Schwarzschild Radius) | Complete |
-| ⏳ Milestone 4 | Photon Sphere | Planned |
-| ⏳ Milestone 5 | Accretion Disk | Planned |
+| ✅ Milestone 4 | Photon Sphere | Complete |
+| ✅ Milestone 5 | Accretion Disk | Complete |
 | ⏳ Milestone 6 | Gravitational Lensing | Planned |
 | ⏳ Milestone 7 | Light Ray Bending | Planned |
 | ⏳ Milestone 8 | Particle System | Planned |
