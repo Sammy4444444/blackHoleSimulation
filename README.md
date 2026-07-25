@@ -370,5 +370,4 @@ License
 
 This project is currently under development.
 
-git commit -m "Update README for completed Milestones 1-5"
-git push origin main
+
