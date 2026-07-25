@@ -17,7 +17,7 @@ namespace bhs::rendering {
         return renderer;
     }
 
-    void Renderer::initialize(float eventHorizonRadius) {
+    void Renderer::initialize(float eventHorizonRadius, float photonSphereRadius) {
         if (m_initialized) {
             return;
         }
@@ -31,11 +31,16 @@ namespace bhs::rendering {
         m_starShader.loadFromFiles("assets/shaders/star.vert", "assets/shaders/star.frag");
         m_starMesh.upload(createStarfieldData(), GL_POINTS);
 
-        // Event horizon: reuses the existing basic shader/mesh pipeline.
-        // Viewed from outside without lensing, an event horizon is
-        // indistinguishable from a flat black sphere (it absorbs everything);
-        // gravitational lensing is a separate future roadmap item.
+        // Event horizon: reuses the same UV sphere generator and basic
+        // shader as the debug reference shape, just sized to the physically
+        // computed radius and drawn solid black. No new shader needed.
         m_horizonMesh.upload(createUVSphereData(eventHorizonRadius));
+
+        // Photon sphere: same generator/shader again, sized to its own
+        // physically computed radius. Drawn as a wireframe (see render())
+        // rather than solid, so it stays visually distinct from the solid
+        // black horizon.
+        m_photonSphereMesh.upload(createUVSphereData(photonSphereRadius));
 
         m_initialized = true;
 
@@ -51,6 +56,7 @@ namespace bhs::rendering {
         m_sphereMesh.release();
         m_starMesh.release();
         m_horizonMesh.release();
+        m_photonSphereMesh.release();
         m_initialized = false;
     }
 
@@ -115,9 +121,26 @@ namespace bhs::rendering {
         const Mesh& activeMesh = m_useCube ? m_cubeMesh : m_sphereMesh;
         activeMesh.draw();
 
-        // Event horizon: opaque black sphere, same shader/model matrix.
+        // Event horizon: same shader/model/view/projection already bound
+        // above, just a different color and mesh. Depth testing against the
+        // debug shape and starfield resolves correctly regardless of draw
+        // order since all three are opaque geometry.
         glUniform3f(colorLoc, 0.0f, 0.0f, 0.0f);
         m_horizonMesh.draw();
+
+        // Photon sphere: drawn as a wireframe so it stays visually distinct
+        // from the solid black horizon. Polygon mode and line width are
+        // scoped to just this draw call and restored immediately after,
+        // matching the pattern already used for the starfield's blend/depth
+        // state — this is drawcall-specific, not global context setup.
+        glUniform3f(colorLoc, 1.0f, 0.6f, 0.1f);
+        glPolygonMode(GL_FRONT_AND_BACK, GL_LINE);
+        glLineWidth(2.0f);
+
+        m_photonSphereMesh.draw();
+
+        glLineWidth(1.0f);
+        glPolygonMode(GL_FRONT_AND_BACK, GL_FILL);
 
         m_shader.unbind();
     }

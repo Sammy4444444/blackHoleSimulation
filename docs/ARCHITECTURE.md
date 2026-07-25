@@ -71,9 +71,9 @@ flowchart TB
 
 | Feature | Target module |
 |---------|---------------|
-| Event horizon | Physics (radius) + Rendering (sphere/mesh) — done |
-| Schwarzschild radius | Physics constants (done) + UI display (pending) |
-| Photon sphere | Physics + Rendering (wireframe sphere) |
+| Event horizon | Physics (radius) + Rendering (sphere/mesh) — implemented (v0.3) |
+| Schwarzschild radius | Physics constants + UI display — implemented (v0.3 radius, v0.4 UI display) |
+| Photon sphere | Physics + Rendering (wireframe sphere) — implemented (v0.4) |
 | Accretion disk | Rendering (custom shader) + Physics (thermodynamics) |
 | Particle orbits | Physics (integrator) + Rendering (instanced points) |
 | Gravitational lensing | Rendering (ray march / texture distortion) |

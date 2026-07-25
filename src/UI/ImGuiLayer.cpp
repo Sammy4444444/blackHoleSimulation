@@ -3,6 +3,7 @@
 #include "Camera/CameraController.h"
 #include "Core/Log.h"
 #include "Core/Timer.h"
+#include "Physics/PhysicsWorld.h"
 
 #include <imgui.h>
 #include <backends/imgui_impl_glfw.h>
@@ -82,6 +83,15 @@ void ImGuiLayer::render() {
         camera.position().x, camera.position().y, camera.position().z);
     ImGui::Text("Camera yaw: %.1f  pitch: %.1f  fov: %.1f",
         camera.yaw(), camera.pitch(), camera.fov());
+    ImGui::Separator();
+    ImGui::Text("Black Hole (read-only)");
+    const auto& physicsWorld = physics::PhysicsWorld::instance();
+    const float schwarzschildRadius = physicsWorld.schwarzschildRadius();
+    const float photonSphereRadius = physicsWorld.photonSphereRadius();
+    ImGui::Text("Mass: %.2f", physicsWorld.mass());
+    ImGui::Text("Event Horizon Rs: %.2f", schwarzschildRadius);
+    ImGui::Text("Photon Sphere Rp: %.2f", photonSphereRadius);
+    ImGui::Text("Rp / Rs: %.2f", photonSphereRadius / schwarzschildRadius);
     ImGui::Separator();
     ImGui::Text("Controls");
     ImGui::BulletText("W/A/S/D - move");

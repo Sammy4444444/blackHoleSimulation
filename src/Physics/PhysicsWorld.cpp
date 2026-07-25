@@ -24,13 +24,16 @@ void PhysicsWorld::update(float /*deltaTime*/) {
     // Relativistic physics and orbital integration will be implemented here.
 }
 
-float PhysicsWorld::schwarzschildRadius() const {
-    // Geometrized units (G = c = 1): Rs = 2GM/c² reduces to Rs = 2M.
-    return 2.0f * kGravitationalConstant * m_mass / (kSpeedOfLight * kSpeedOfLight);
-}
-
 void PhysicsWorld::shutdown() {
     m_initialized = false;
+}
+
+float PhysicsWorld::schwarzschildRadius() const {
+    // Rs = 2GM/c^2. This simulator uses geometrized units (G = c = 1, see
+    // Constants.h), so the equation reduces to Rs = 2M. G and c are kept as
+    // named factors rather than folded away so the formula stays
+    // dimensionally honest and correct if units ever change.
+    return 2.0f * kGravitationalConstant * m_mass / (kSpeedOfLight * kSpeedOfLight);
 }
 
 } // namespace bhs::physics

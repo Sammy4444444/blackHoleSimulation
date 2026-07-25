@@ -13,7 +13,7 @@ namespace bhs::rendering {
     public:
         static Renderer& instance();
 
-        void initialize(float eventHorizonRadius);
+        void initialize(float eventHorizonRadius, float photonSphereRadius);
         void shutdown();
         void render(const camera::Camera& camera);
 
@@ -30,6 +30,7 @@ namespace bhs::rendering {
         Shader m_starShader;
         Mesh m_starMesh;
         Mesh m_horizonMesh;
+        Mesh m_photonSphereMesh;
         bool m_useCube = false;
         bool m_initialized = false;
     };

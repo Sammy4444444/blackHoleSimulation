@@ -2,13 +2,14 @@
 
 namespace bhs::physics {
 
-// Geometrized units (G = c = 1), the standard convention in numerical
-// relativity and toy simulators. This lets mass be expressed as a small
-// dimensionless "world units" value that produces a visually sensible
-// Schwarzschild radius (Rs = 2GM/c² reduces to Rs = 2M), instead of using
-// real SI values (solar masses, kilometers) that would be meaningless
-// next to this project's world scale.
-constexpr float kGravitationalConstant = 1.0f;
-constexpr float kSpeedOfLight = 1.0f;
+    // This simulator works in geometrized units, where the gravitational
+    // constant and the speed of light are both defined as 1. This is the
+    // standard convention for numerical relativity / toy black-hole sims: it
+    // keeps physically-derived quantities (Schwarzschild radius, and later
+    // the metric tensor and geodesic integrator) at world-scale numbers
+    // instead of astronomically large/small SI values that would be
+    // meaningless next to this project's scene scale.
+    constexpr float kGravitationalConstant = 1.0f;
+    constexpr float kSpeedOfLight = 1.0f;
 
 } // namespace bhs::physics
