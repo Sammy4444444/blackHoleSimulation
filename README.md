@@ -370,12 +370,5 @@ License
 
 This project is currently under development.
 
-
-**Catatan penting:** gue sengaja nggak menulis klaim yang terlalu spesifik seperti **"pixel-perfect"**, **"real-time production-ready"**, atau fitur M6 yang belum dibuat. README ini mencerminkan apa yang sudah kita kerjakan sampai **Milestone 5**.
-
-Setelah lu copy ke `README.md`, jalankan:
-
-```powershell
-git add README.md
 git commit -m "Update README for completed Milestones 1-5"
 git push origin main
