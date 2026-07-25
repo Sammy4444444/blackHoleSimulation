@@ -1,4 +1,4 @@
-# 🌌 Simulation Of Black Hole
+#  Simulation Of Black Hole
 
 > An educational C++ and OpenGL project that builds a real-time black hole simulator from first principles, combining computer graphics, numerical methods, and simplified general relativity.
 
@@ -14,7 +14,7 @@ Every milestone introduces a new feature together with the theory and computatio
 
 ---
 
-# 🎯 Project Goals
+#  Project Goals
 
 This project aims to explore and teach:
 
@@ -39,7 +39,7 @@ Each milestone builds upon the previous rendering and physics systems.
 
 ---
 
-# 📚 Learning Roadmap
+#  Learning Roadmap
 
 | Milestone | Topic | Status |
 |---|---|---|
@@ -56,7 +56,7 @@ Each milestone builds upon the previous rendering and physics systems.
 
 ---
 
-# 🧠 Physics & Mathematics
+#  Physics & Mathematics
 
 Throughout the project, the simulator explores concepts including:
 
