@@ -14,21 +14,13 @@ Image-quality refinement of the existing M5-M7 lensing pass, with no changes to 
 - **Denser default starfield** (5,000 → 10,000 points), a small independent rendering-quality adjustment.
 - New ImGui panel section ("Milestone 8: Lensing Refinement (Phase 1)") to enable supersampling, choose the grid size, and toggle jitter.
 
-#### Mathematical Derivation & RK4 Step Overshoot Fix
+#### Mathematical Derivation & RK4 Escape Threshold Fix
 
 <p align="center">
-  <img src="docs/calculate.png" alt="Schwarzschild Geodesic & RK4 Escape Interpolation Derivation" width="700"/>
+  <img src="docs/calculate.png" alt="Schwarzschild Geodesic Derivation & RK4 Escape Interpolation" width="750"/>
   <br>
-  <em>Figure 1: Mathematical derivation for resolving the ~20.65 pixel lensing discontinuity caused by RK4 step overshooting via linear escape angle interpolation.</em>
+  <em>Figure: Mathematical breakdown of Schwarzschild geodesic equations, RK4 step overshoot analysis, and the linear interpolation fix for exact escape angles.</em>
 </p>
-
-All four new controls default to the pre-M8 (Milestone 7) behavior: supersampling and jitter start OFF, so `traceRay()` runs exactly once per pixel with the same center-of-pixel ray reconstruction used since Phase 3 unless a person explicitly turns supersampling on.
-
-- **Optional NxN supersampling** (1x1 to 4x4, off by default): the per-pixel ray tracer (`traceRay()` in `assets/shaders/lensing.frag`) is invoked once per subsample, each with its own fractionally-offset ray direction, and the results are averaged.
-- **Optional subpixel jitter**: stratified (jittered) sampling of each subsample's position within its grid cell, instead of always sampling at the exact cell center.
-- **Trilinear-filtered, mipmapped environment cubemap**: the baked starfield cubemap now builds a full mipmap chain and samples with `GL_LINEAR_MIPMAP_LINEAR`, reducing shimmer/aliasing on distant starfield detail.
-- **Denser default starfield** (5,000 → 10,000 points), a small independent rendering-quality adjustment.
-- New ImGui panel section ("Milestone 8: Lensing Refinement (Phase 1)") to enable supersampling, choose the grid size, and toggle jitter.
 
 All four new controls default to the pre-M8 (Milestone 7) behavior: supersampling and jitter start OFF, so `traceRay()` runs exactly once per pixel with the same center-of-pixel ray reconstruction used since Phase 3 unless a person explicitly turns supersampling on.
 
