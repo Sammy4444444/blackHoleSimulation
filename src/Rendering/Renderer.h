@@ -75,6 +75,43 @@ namespace bhs::rendering {
         void setDiskBrightness(float brightness) { m_diskBrightness = brightness; }
         float diskBrightness() const { return m_diskBrightness; }
 
+        // Milestone 7: relativistic redshift/Doppler shading of the M6
+        // disk (see lensing.frag's dopplerRedshiftFactor()/diskEmission()).
+        // Off by default, same reasoning as m_diskEnabled -- and only
+        // meaningful while the disk itself is enabled, since it modulates
+        // the disk's temperature before shading.
+        void setRelativisticEnabled(bool enabled) { m_relativisticEnabled = enabled; }
+        bool relativisticEnabled() const { return m_relativisticEnabled; }
+
+        // Sign of the disk's fixed world-space rotation direction relative
+        // to +Y: +1.0 = prograde, -1.0 = retrograde. Only affects which
+        // side of the disk is computed as approaching/receding for the
+        // Doppler term -- never affects M5/M6 geometry. Stored as a float
+        // (not a bool) since it is consumed directly as a sign multiplier
+        // by the shader.
+        void setDiskRotationDirection(float direction) { m_diskRotationDirection = direction; }
+        float diskRotationDirection() const { return m_diskRotationDirection; }
+
+        // Milestone 8, Phase 1: lensing refinement via optional per-pixel
+        // NxN supersampling (see lensing.frag's traceRay()/main()). Off by
+        // default so the M7 single-sample-per-pixel rendering remains the
+        // baseline unless explicitly turned on from ImGui.
+        void setSupersamplingEnabled(bool enabled) { m_supersamplingEnabled = enabled; }
+        bool supersamplingEnabled() const { return m_supersamplingEnabled; }
+
+        // NxN supersampling grid size. Clamped to [1, 4] here (in addition
+        // to the shader's own defensive clamp) so out-of-range values can
+        // never be uploaded in the first place.
+        void setSupersamplingGrid(int grid) { m_supersamplingGrid = (grid < 1) ? 1 : ((grid > 4) ? 4 : grid); }
+        int supersamplingGrid() const { return m_supersamplingGrid; }
+
+        // Optional subpixel jitter/stratified sampling, layered on top of
+        // the supersampling grid above. Only meaningful while supersampling
+        // itself is enabled (a 1x1 grid has only one, unjitterable, sample
+        // position). Off by default, same reasoning as m_supersamplingEnabled.
+        void setJitterEnabled(bool enabled) { m_jitterEnabled = enabled; }
+        bool jitterEnabled() const { return m_jitterEnabled; }
+
     private:
         Renderer() = default;
 
@@ -121,6 +158,18 @@ namespace bhs::rendering {
         float m_diskOuterRadius = 1.0f;   // overwritten with a multiple of Rs in initialize()
         float m_diskReferenceTemperature = 1.0f;
         float m_diskBrightness = 8.0f;
+
+        // Milestone 7: relativistic redshift/Doppler state. See accessors
+        // above.
+        bool m_relativisticEnabled = false;
+        float m_diskRotationDirection = 1.0f; // +1 = prograde (+Y), -1 = retrograde
+
+        // Milestone 8, Phase 1: lensing refinement state. See accessors
+        // above. All off/at-baseline by default so M7 rendering is
+        // reproduced exactly unless explicitly changed from ImGui.
+        bool m_supersamplingEnabled = false;
+        int m_supersamplingGrid = 2; // only consulted while m_supersamplingEnabled is true
+        bool m_jitterEnabled = false;
     };
 
 } // namespace bhs::rendering

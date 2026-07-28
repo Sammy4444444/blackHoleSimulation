@@ -64,6 +64,15 @@ namespace bhs::rendering {
                 0, GL_RGBA, GL_UNSIGNED_BYTE, nullptr);
         }
 
+        // Milestone 8, Phase 1: trilinear (mipmapped) filtering instead of
+        // plain bilinear. This is a pure sampling-quality improvement for
+        // the environment cubemap -- it changes nothing about which
+        // direction is sampled (that's still exactly finalDir from the
+        // unmodified M5 geodesic integration in lensing.frag), only how
+        // that sample is filtered, reducing aliasing/shimmer on distant
+        // starfield detail versus the single-level bilinear filtering used
+        // through M7. Mipmaps themselves are generated below, once all six
+        // faces have been rendered into level 0.
         glTexParameteri(GL_TEXTURE_CUBE_MAP, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
         glTexParameteri(GL_TEXTURE_CUBE_MAP, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
         glTexParameteri(GL_TEXTURE_CUBE_MAP, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
@@ -147,6 +156,15 @@ namespace bhs::rendering {
 
         starShader.unbind();
         Framebuffer::unbind();
+
+        // Milestone 8, Phase 1: build the mipmap chain now that all six
+        // faces are populated at level 0. Must happen after the face loop
+        // (mipmap generation needs complete base-level data) and while the
+        // cubemap is still bound. Combined with the GL_LINEAR_MIPMAP_LINEAR
+        // min-filter set above, this gives trilinear-filtered environment
+        // sampling in lensing.frag.
+        glBindTexture(GL_TEXTURE_CUBE_MAP, m_cubemapTexture);
+        glGenerateMipmap(GL_TEXTURE_CUBE_MAP);
 
         // --- Restore state for the caller ---
         glViewport(previousViewport[0], previousViewport[1], previousViewport[2], previousViewport[3]);

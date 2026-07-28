@@ -160,6 +160,58 @@ void ImGuiLayer::render() {
         }
     }
     ImGui::Separator();
+    ImGui::Text("Milestone 7: Relativistic Effects");
+    {
+        auto& renderer = rendering::Renderer::instance();
+        bool relativisticEnabled = renderer.relativisticEnabled();
+        if (ImGui::Checkbox("Enable Relativistic Redshift/Doppler", &relativisticEnabled)) {
+            renderer.setRelativisticEnabled(relativisticEnabled);
+        }
+        if (!renderer.diskEnabled()) {
+            ImGui::TextDisabled("(has no effect until the accretion disk above is enabled)");
+        }
+
+        if (relativisticEnabled) {
+            static const char* kRotationDirections[] = {
+                "Prograde (+Y)",
+                "Retrograde (-Y)"
+            };
+            int rotationIndex = (renderer.diskRotationDirection() < 0.0f) ? 1 : 0;
+            if (ImGui::Combo("Disk Rotation Direction", &rotationIndex, kRotationDirections, 2)) {
+                renderer.setDiskRotationDirection(rotationIndex == 0 ? 1.0f : -1.0f);
+            }
+            ImGui::TextDisabled("Approaching side blueshifts/brightens; receding side redshifts/dims.");
+        }
+    }
+    ImGui::Separator();
+    ImGui::Text("Milestone 8: Lensing Refinement (Phase 1)");
+    {
+        auto& renderer = rendering::Renderer::instance();
+        bool supersamplingEnabled = renderer.supersamplingEnabled();
+        if (ImGui::Checkbox("Enable Supersampling", &supersamplingEnabled)) {
+            renderer.setSupersamplingEnabled(supersamplingEnabled);
+        }
+        if (!renderer.lensingEnabled()) {
+            ImGui::TextDisabled("(has no effect until the lensing pass above is enabled)");
+        }
+
+        if (supersamplingEnabled) {
+            int grid = renderer.supersamplingGrid();
+            if (ImGui::SliderInt("Supersampling Grid (NxN)", &grid, 1, 4)) {
+                renderer.setSupersamplingGrid(grid);
+            }
+            ImGui::TextDisabled("%d sample(s) per pixel.", grid * grid);
+
+            bool jitterEnabled = renderer.jitterEnabled();
+            if (ImGui::Checkbox("Enable Jitter (stratified subpixel sampling)", &jitterEnabled)) {
+                renderer.setJitterEnabled(jitterEnabled);
+            }
+            if (grid <= 1) {
+                ImGui::TextDisabled("(has no effect at a 1x1 grid -- there's only one sample position)");
+            }
+        }
+    }
+    ImGui::Separator();
     ImGui::Text("Controls");
     ImGui::BulletText("W/A/S/D - move");
     ImGui::BulletText("Q/E - down/up");

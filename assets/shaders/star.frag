@@ -10,10 +10,10 @@ void main() {
     // from the center to fade alpha toward the edge.
     vec2 centered = gl_PointCoord - vec2(0.5);
     float dist = length(centered);
-    float falloff = 1.0 - smoothstep(0.0, 0.5, dist);
-    if (falloff <= 0.0) {
+    if (dist > 0.5) {
         discard;
     }
+    float falloff = 1.0;
 
     // Brightness and a slight color-temperature tint derived from the same
     // per-star hash used for point size in the vertex shader, so a given

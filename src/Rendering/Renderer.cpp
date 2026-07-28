@@ -295,6 +295,22 @@ namespace bhs::rendering {
         const int diskTempLoc = glGetUniformLocation(m_lensingShader.id(), "uDiskReferenceTemperature");
         const int diskBrightnessLoc = glGetUniformLocation(m_lensingShader.id(), "uDiskBrightness");
 
+        // Milestone 7: relativistic redshift/Doppler uniforms. Same
+        // always-set pattern as the Milestone 6 disk uniforms above --
+        // uRelativisticEnabled in the shader is the single source of truth
+        // for whether the effect is applied.
+        const int relativisticEnabledLoc = glGetUniformLocation(m_lensingShader.id(), "uRelativisticEnabled");
+        const int diskRotationDirLoc = glGetUniformLocation(m_lensingShader.id(), "uDiskRotationDirection");
+
+        // Milestone 8, Phase 1: lensing refinement (supersampling/jitter)
+        // uniforms. Same always-set pattern as the M6/M7 uniforms above --
+        // uSupersamplingEnabled in the shader is the single source of truth
+        // for whether main() takes the multi-sample path at all.
+        const int resolutionLoc = glGetUniformLocation(m_lensingShader.id(), "uResolution");
+        const int supersamplingEnabledLoc = glGetUniformLocation(m_lensingShader.id(), "uSupersamplingEnabled");
+        const int supersamplingGridLoc = glGetUniformLocation(m_lensingShader.id(), "uSupersamplingGrid");
+        const int jitterEnabledLoc = glGetUniformLocation(m_lensingShader.id(), "uJitterEnabled");
+
         // [PHASE3-DEBUG] One-shot full diagnostic dump covering checkpoints
         // C-G, logged the first frame after the toggle switches on so it
         // doesn't spam every frame at 60fps.
@@ -339,6 +355,27 @@ namespace bhs::rendering {
         glUniform1f(diskOuterLoc, glm::max(m_diskOuterRadius, m_diskInnerRadius + 1e-3f));
         glUniform1f(diskTempLoc, m_diskReferenceTemperature);
         glUniform1f(diskBrightnessLoc, m_diskBrightness);
+
+        // Milestone 7: relativistic redshift/Doppler parameters.
+        glUniform1i(relativisticEnabledLoc, m_relativisticEnabled ? 1 : 0);
+        glUniform1f(diskRotationDirLoc, m_diskRotationDirection);
+
+        // Milestone 8, Phase 1: lensing refinement parameters. uResolution
+        // is queried fresh each frame (rather than cached) since the
+        // framebuffer can be resized at any time; render() already queries
+        // the same size for glViewport() just before this pass runs, but
+        // that local variable isn't visible here, so it's queried again --
+        // cheap (a single GLFW call) and avoids threading an extra
+        // parameter through for a value this function can get itself.
+        int lensingFbWidth = 0;
+        int lensingFbHeight = 0;
+        glfwGetFramebufferSize(glfwGetCurrentContext(), &lensingFbWidth, &lensingFbHeight);
+        glUniform2f(resolutionLoc,
+            static_cast<float>(lensingFbWidth > 0 ? lensingFbWidth : 1),
+            static_cast<float>(lensingFbHeight > 0 ? lensingFbHeight : 1));
+        glUniform1i(supersamplingEnabledLoc, m_supersamplingEnabled ? 1 : 0);
+        glUniform1i(supersamplingGridLoc, m_supersamplingGrid);
+        glUniform1i(jitterEnabledLoc, m_jitterEnabled ? 1 : 0);
 
         // Explicit texture unit binding: texture unit 0 is used deliberately
         // (not left implicit) and the sampler uniform is pointed at it

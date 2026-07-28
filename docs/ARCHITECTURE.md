@@ -428,6 +428,9 @@ GPU/visual run — see "Runtime Status" in the final report.
   emission is modeled yet (`ARCHITECTURE.md`'s existing roadmap lists
   "Relativistic effects (Doppler, redshift)" as a distinct, later,
   planned feature — this milestone intentionally does not pull it in).
+  **Addressed in Milestone 7**, below — off by default, so this
+  milestone's own output is unaffected unless Milestone 7 is explicitly
+  enabled.
 - Near-radial rays (a solid angle far below one pixel at practical
   resolutions) skip disk testing entirely, per the near-radial branch
   discussion above.
@@ -435,6 +438,336 @@ GPU/visual run — see "Runtime Status" in the final report.
   (`kPhiStep = 0.02` rad), not resolved to arbitrary precision — visually
   negligible at this step size, consistent with M5's own stated
   discretization error budget.
+
+## Milestone 7: Relativistic effects (redshift + Doppler)
+
+Adds gravitational redshift and relativistic Doppler shading to the M6
+accretion disk — still entirely inside `assets/shaders/lensing.frag`, at
+the same disk-crossing point M6 already resolves. No new shader files, no
+new render pass, no changes to `Camera`, `Mesh`, `PhysicsWorld`, or the
+M1-M4/M5 RK4 integration itself. `Renderer` gains two new state
+fields/accessors mirroring the M6 disk pattern; `ImGuiLayer` gains one new
+UI section. Off by default (`uRelativisticEnabled = 0`), so M6's own
+output is byte-for-byte unchanged unless a user explicitly opts in.
+
+### Physical model
+
+For material on a circular Keplerian test-particle orbit in the
+Schwarzschild equatorial plane, the frequency ratio `g = nu_observed /
+nu_emitted` seen by a *static* observer has an exact closed form (Luminet
+1979; Cunningham 1975):
+
+```
+g = sqrt(1 - 3M/r) / (1 - s*Omega(r)*b) / sqrt(f(r0))
+```
+
+- `Omega(r) = sqrt(M) / r^1.5` — the material's Keplerian angular velocity
+  at the crossing radius `r`.
+- `b` — the photon's impact parameter. Already computed once per pixel by
+  M5, before the RK4 loop, and conserved along the entire geodesic (a
+  consequence of Schwarzschild's spherical symmetry) — so M7 reads it
+  as-is at the disk-crossing point rather than recomputing anything.
+- `s = sign(dot(n, +Y)) * rotationDir` — resolves the sign ambiguity that
+  the *photon's* orbital-plane basis `n` (established once per pixel by
+  M5) can point along either `+Y` or `-Y` depending on the ray, while the
+  *disk* has one fixed rotation sense in world space (`rotationDir`, a UI
+  toggle, default `+1` = prograde about `+Y`). `s = +1` means this ray's
+  winding direction matches the disk's rotation (co-rotating /
+  "approaching" side); `s = -1` means the opposite ("receding" side).
+- `sqrt(1 - 3M/r)` — the combined gravitational + transverse-Doppler
+  time-dilation factor for a circular orbit; already folds two of the
+  three requested effects into one closed-form term.
+- `(1 - s*Omega*b)` — the longitudinal-Doppler factor (radial component of
+  the disk material's orbital velocity relative to the photon's line of
+  sight).
+- `1/sqrt(f(r0))`, `f(r0) = 1 - Rs/r0` — finite-camera-distance correction.
+  The `sqrt(1-3M/r)` term above is implicitly normalized against a static
+  observer *at infinity*; dividing by `sqrt(f(r0))` (the same Schwarzschild
+  lapse M5 already computes once per pixel for the impact-parameter
+  formula) re-normalizes `g` against a static observer at the camera's
+  actual, finite radius `r0` instead, making the result exact rather than
+  an "observer at infinity" approximation. `r0` — and therefore `f(r0)` —
+  is the same for every pixel in a given frame (it depends only on camera
+  position), so this is one extra `sqrt` per pixel, computed unconditionally
+  alongside `b` and only ever read if a disk crossing is found.
+
+### Why one substitution produces color shift *and* beaming
+
+Because a blackbody spectrum is Lorentz-invariant, a redshifted/blueshifted
+blackbody spectrum is itself exactly a blackbody spectrum at the scaled
+temperature `g*T` — a standard result, not an approximation introduced
+here. Substituting `T_obs = g*T` into the *existing* M6 pipeline
+(`blackbodyApprox(T_obs/Tref)` for color, `flux = brightness*T_obs^4` for
+brightness) before it's used means:
+
+- **Color shift** falls out of `blackbodyApprox`: `g>1` (approaching side)
+  pushes `T_obs` toward the hot blue-white end of the ramp; `g<1`
+  (receding side, or gravitationally redshifted near-`Rin` material) pushes
+  it toward the cool dim-red end.
+- **Relativistic Doppler beaming** falls out of the existing `T^4` flux
+  term automatically becoming `(g*T)^4 = g^4 * T^4` — exactly the standard
+  relativistic-beaming intensity factor (specific intensity `I_nu/nu^3` is
+  Lorentz-invariant, so bolometric flux scales as `I_obs = g^4 * I_emit`).
+
+No separate color or brightness code path is needed — `diskEmission()`'s
+existing four steps (temperature -> color -> `T^4` flux -> tonemap) are
+reused entirely unmodified; only the `T` fed into them changes.
+
+### Where it runs (GPU, not CPU)
+
+All M7 calculation is in `lensing.frag`, at the same point M6 already
+calls `diskEmission()` after a disk crossing is found — `r`, `b`, and `n`
+are all already-computed local shader variables at that point, so nothing
+needs to be passed back from the CPU beyond two small new uniforms
+(`uRelativisticEnabled`, `uDiskRotationDirection`). This mirrors M6's own
+reasoning for keeping physics in the shader: the crossing radius and
+orbital-plane basis only exist as the per-pixel result of the RK4
+integration, so computing `g` anywhere but immediately at the crossing
+point would mean re-deriving or re-passing state that's already sitting in
+local variables at exactly the right place.
+
+`dopplerRedshiftFactor(r, b, n, M, rotationDir, invSqrtF0)` is a new
+free function in `lensing.frag`; `diskEmission()`'s signature grows to
+accept `b`, `n`, `M`, `rotationDir`, `invSqrtF0`, and
+`relativisticEnabled` (all read from already-in-scope shader locals/
+uniforms at the one call site in the RK4 loop) — see `diskEmission()`'s
+own comment for the M6-unchanged-when-disabled guarantee.
+
+### Numerical guards
+
+- `sqrt(1 - 3M/r)`: the radicand is clamped to `>= 1e-6` before the
+  `sqrt`, the same style as M5/M6's other radicand guards, since `r` can
+  in principle approach or go below the photon sphere `r = 1.5*Rs`
+  (though in practice `Rin >= Rs` and `Rin` defaults to the ISCO,
+  `3*Rs`, well outside the photon sphere).
+- `(1 - s*Omega*b)`: this denominator's true zero is the physical
+  (Cunningham 1975) infinite-blueshift condition for a photon tangent to
+  a co-rotating relativistic circular orbit — a real divergence, not a
+  numerical artifact, that real disks approach arbitrarily closely near
+  the photon sphere. `kMinDopplerDenom = 0.05` clamps its *magnitude*
+  away from zero (sign-preserving), trading the true divergence for a
+  bounded-but-large spike right at that boundary, rather than dividing by
+  (numerical) zero.
+- `g` itself is clamped to `[0, kMaxDopplerFactor]` with
+  `kMaxDopplerFactor = 8.0`, applied *after* combining all three terms.
+  This guarantees a bounded, driver-independent input to `T_obs^4` and the
+  existing exponential tonemap regardless of how close a ray passes to the
+  photon sphere — the tonemap already saturates smoothly toward white for
+  large inputs (same guarantee M6 already relies on for large
+  brightness/temperature), so capping `g` trades "unclamped physical
+  divergence" for "very bright but bounded pixel," not for a visible
+  discontinuity.
+- `Omega(r) = sqrt(M)/r^1.5`: guarded with `max(M, 0)` and `max(r, 1e-6)`
+  the same way M6 guards its own `pow`/`sqrt` calls.
+
+### UI (`ImGuiLayer`)
+
+New "Milestone 7: Relativistic Effects" section, directly below the M6
+disk section:
+
+- **Enable Relativistic Redshift/Doppler** checkbox — off by default;
+  disabled/no-effect note shown when the M6 disk itself is off (mirrors
+  the M6 section's own "no effect until lensing is enabled" note).
+- **Disk Rotation Direction** combo (`Prograde (+Y)` / `Retrograde (-Y)`),
+  shown only while the effect is enabled — sets `rotationDir` (`+1`/`-1`).
+  Only changes *which* side of the disk reads as approaching/receding; it
+  never changes M5/M6 geometry, disk extent, or temperature shape.
+
+### Regression: Milestones 5 & 6
+
+With `uRelativisticEnabled == 0` (the default), `diskEmission()` takes the
+same `T = diskTemperature(r, innerRadius)` value M6 already computed and
+feeds it into the same unmodified four-step color/flux/tonemap pipeline —
+the `if (relativisticEnabled != 0)` block that computes and applies `g` is
+never entered, so `diskEmission()`'s output is byte-for-byte identical to
+M6's. The M5 RK4 loop, capture/escape logic, near-radial branch, and final
+cubemap sampling are untouched by this milestone (M7 only adds two new
+parameters threaded through the existing M6 call site, not new control
+flow in the loop itself). `Camera`, `Mesh`, `PhysicsWorld`, and the M1-M4
+path in `render()` remain untouched.
+
+### Validation
+
+Performed by replicating `dopplerRedshiftFactor()`'s exact formula and
+numerical guards in Python (`/home/claude/validate/validate_m7.py` in the
+working environment used to build this milestone; not part of the shipped
+repo, same convention as the M5/M6 validation scripts). This is
+algorithmic/numerical validation of the physics and guards, not a
+GPU/visual run — see "Runtime Status" in the final report.
+
+- **Approaching vs. receding asymmetry**: for a representative crossing
+  radius (`r = 6*Rs`) and impact parameter, the co-rotating ("approaching")
+  side produces `g > 1` (blueshift) and the counter-rotating ("receding")
+  side produces `g < 1` (redshift), confirmed numerically.
+- **Rotation-direction toggle**: flipping `rotationDir` from `+1` to `-1`
+  exactly swaps which side reads as approaching vs. receding (`g` values
+  swap, matching to floating-point precision) — confirms the UI toggle
+  does what it claims without needing a second formula path.
+- **Gravitational redshift strengthens inward**: isolating the
+  gravitational term alone (`s = 0`, no Doppler contribution) and sweeping
+  `r` from `4*Rps` down to `1.001*Rps` (`Rps` = photon sphere radius)
+  shows `g` decreasing monotonically at every step, confirming
+  gravitational redshift strengthens continuously as the crossing radius
+  approaches the photon sphere.
+- **Relativistic beaming**: at the same test radius, `T_obs^4` (final
+  flux term) for the approaching side numerically exceeds the receding
+  side by roughly 80x in the tested configuration, confirming the `g^4`
+  beaming factor produces a real, visible brightness asymmetry rather than
+  a negligible one.
+- **NaN/Inf/out-of-range sweep**: 200,000 random samples of
+  `(r, b, n_dot_up, rotationDir)`, including `r` arbitrarily close to
+  (but always just outside) the photon sphere, and separately `r` at and
+  *inside* the photon sphere (`r <= 1.5*Rs`, a region the real disk never
+  reaches since `Rin >= Rs` and defaults to `3*Rs`, but exercised anyway
+  as a guard stress-test) — zero NaN, zero Inf, zero values outside
+  `[0, kMaxDopplerFactor]` across all samples.
+- **M6-disabled equivalence**: confirmed the M7-disabled temperature path
+  (`T` unmodified) is identical to the M6 baseline computation, matching
+  the "Regression" guarantee above.
+
+### Known limitations
+
+- Static-observer approximation: the camera is treated as a static
+  observer, not a freely-falling one — consistent with how the existing
+  FPS-style camera controller works, but not what a physically infalling
+  observer would measure.
+- Non-spinning (Schwarzschild) black hole only — no frame-dragging; all
+  visual asymmetry comes from the disk material's own orbital motion
+  relative to the line of sight, not spacetime rotation. Extending to Kerr
+  is out of scope for this milestone.
+- Circular-Keplerian-orbit assumption inherited from M6: below the ISCO,
+  material is actually plunging rather than on a circular orbit — an
+  existing M6 limitation, not new to M7 (`g` is only ever evaluated at
+  crossing radii `r >= Rin`, and `Rin` defaults to the ISCO).
+- `g` is hard-clamped to `kMaxDopplerFactor = 8.0`; extremely
+  close-to-photon-sphere crossings (not reachable with the default
+  ISCO-bound `Rin`, but possible if a user manually lowers `Rin` toward
+  `Rs`) will read as very bright but capped, rather than showing the true
+  unbounded divergence.
+- Color mapping still goes through M6's artistic `blackbodyApprox` ramp
+  (not a physically integrated spectral calculation), so `T_obs` beyond
+  the ramp's hottest reference color simply saturates at the same
+  blue-white hue rather than shifting further.
+
+## Milestone 8, Phase 1: Lensing refinement (supersampling + environment filtering)
+
+Image-quality refinement layered on top of the M5-M7 pipeline in
+`assets/shaders/lensing.frag`, `src/Rendering/Renderer.{h,cpp}`,
+`src/Rendering/EnvironmentBaker.cpp`, `src/Rendering/Primitives.h`, and
+`src/UI/ImGuiLayer.cpp`. No changes to the Schwarzschild geodesic
+equations, the RK4 integrator, the capture/escape logic, or the M6/M7
+disk and relativistic-shading math — every physics line this milestone
+touches was moved (into a new function), not rewritten.
+
+### `traceRay()` refactor
+
+The entire per-pixel M5 (lensing) + M6 (disk crossing) + M7 (relativistic
+shading) computation that used to live directly in `main()` — from ray/
+orbital-plane setup through the RK4 loop to the final captured/disk/
+environment color resolution — is now a standalone function:
+
+```
+vec3 traceRay(vec3 D)
+```
+
+taking a world-space ray direction `D` and returning the resolved color
+for that single ray, with no other change to its body: every `FragColor =
+...; return;` in the old inline version became `return ...;` of the same
+expression, and nothing between those statements was touched. `main()`
+now reconstructs the pixel-center ray (unchanged — same
+`uInvProjection`/`uInvView` unprojection as Phase 3) and, when
+supersampling is disabled, calls `traceRay()` exactly once with that
+direction — reproducing the pre-M8 output bit-for-bit.
+
+### Optional NxN supersampling
+
+When `uSupersamplingEnabled != 0`, `main()` instead loops over a
+`gridSize x gridSize` grid (`gridSize = clamp(uSupersamplingGrid, 1, 4)`),
+reconstructing one additional world-space ray direction per grid cell —
+offset from the pixel center by a fraction of a pixel, using the pixel's
+size in `vScreenUV` space (`1 / uResolution`) — calling `traceRay()` for
+each, and averaging all `gridSize^2` results. `uResolution` (framebuffer
+size in pixels) is uploaded by `Renderer::renderLensingPass()` every
+frame (queried via `glfwGetFramebufferSize`, since the window can be
+resized at any time).
+
+### Optional subpixel jitter
+
+When `uJitterEnabled != 0`, each grid cell's sample position is displaced
+to a random point *within its own cell* (stratified jitter) instead of
+always sitting at the cell's exact center — implemented with a small,
+non-cryptographic `hash12()` hash seeded from `gl_FragCoord` and the cell
+index, so the pattern is deterministic per pixel/frame rather than
+flickering randomly frame to frame. Because each sample stays inside its
+own cell, the grid still evenly partitions the pixel; jitter only
+perturbs *where inside each cell* the sample falls, avoiding the clumping
+that unconstrained (non-stratified) per-pixel random sampling would
+produce.
+
+### Renderer / UI plumbing
+
+- `Renderer` gains `m_supersamplingEnabled` (bool, default `false`),
+  `m_supersamplingGrid` (int, default `2`, clamped to `[1, 4]` in the
+  setter), and `m_jitterEnabled` (bool, default `false`), with matching
+  accessors — the same pattern already used for the M6 disk and M7
+  relativistic-effects state.
+- `Renderer::renderLensingPass()` uploads `uResolution`,
+  `uSupersamplingEnabled`, `uSupersamplingGrid`, and `uJitterEnabled`
+  every frame, unconditionally (same always-set pattern as the M6/M7
+  uniforms), so the shader's own enabled checks are the single source of
+  truth for whether the multi-sample path runs.
+- `ImGuiLayer` gains a "Milestone 8: Lensing Refinement (Phase 1)"
+  section: a checkbox to enable supersampling, an NxN grid slider (1-4,
+  shown only while supersampling is enabled), and a jitter checkbox.
+
+### Environment cubemap: mipmaps + trilinear filtering
+
+`EnvironmentBaker::bake()` now builds a full mipmap chain for the baked
+starfield cubemap (`glGenerateMipmap(GL_TEXTURE_CUBE_MAP)`, called once
+all six faces are rendered into level 0) and samples it with
+`GL_LINEAR_MIPMAP_LINEAR` instead of single-level `GL_LINEAR`. This only
+changes how an already-resolved sample direction (`finalDir`, from the
+unmodified M5 geodesic integration) is filtered against the cubemap —
+it does not change which direction is sampled, so it is a pure
+sampling-quality improvement (reduced aliasing/shimmer on distant
+starfield detail), not a physics or geometry change.
+
+### Starfield density
+
+`createStarfieldData()`'s default point count was raised from 5,000 to
+10,000 (`src/Rendering/Primitives.h`) for a visibly denser sky. Same
+uniform-sphere-surface sampling, same default radius and seed — an
+independent rendering-quality tweak, unrelated to and not affecting the
+black-hole physics or the lensing pipeline that later samples this once
+baked into the environment cubemap.
+
+### Regression guarantee
+
+With `uSupersamplingEnabled == 0` (the default), `main()` takes the
+single-sample branch and calls `traceRay(worldDir)` exactly once with the
+same pixel-center direction Phase 3 always reconstructed — identical
+inputs to identical, unmodified physics code, so Milestone 8 Phase 1
+introduces no change to the default rendered image. The environment
+cubemap's added mipmap levels and trilinear filtering are the only
+default-on change in this milestone, and are a sampling-quality-only
+change with no effect on lensing geometry, capture/escape classification,
+or disk/relativistic shading.
+
+### Known limitations
+
+- Supersampling and jitter only refine the M5-M7 pipeline's *image*
+  quality (antialiasing of the shadow boundary, disk edges, and starfield
+  detail) — they do not change the underlying physics, so effects like
+  the hard capture/escape boundary are smoothed visually across samples
+  but not made more physically precise (each individual sample still uses
+  the same RK4 step size and cutoffs as before).
+- Cost scales as `gridSize^2` full `traceRay()` evaluations per pixel (up
+  to 16x at a 4x4 grid), since each subsample reruns the entire RK4
+  integration independently — there is no shared/amortized work between
+  subsamples of the same pixel.
+- Jitter uses a cheap deterministic hash, not a true random-number
+  generator; it is intended to break up aliasing patterns, not to provide
+  statistically rigorous Monte Carlo sampling.
 
 ## Dependency graph (third-party)
 

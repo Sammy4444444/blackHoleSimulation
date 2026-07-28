@@ -2,7 +2,19 @@
 
 A long-term C++ project for real-time 3D visualization of black hole physics: event horizon, Schwarzschild radius, photon sphere, accretion disk, gravitational lensing, and relativistic effects.
 
-**Current status:** Milestones 1-6 implemented — window/OpenGL loop/FPS camera/ImGui foundation, event horizon, photon sphere, full Schwarzschild geodesic gravitational lensing, and a physically-motivated accretion disk rendered through the same lensing pipeline (see `docs/ARCHITECTURE.md`). Relativistic effects (Doppler/redshift) remain future work.
+**Current status:** Milestones 1-8 (Phase 1) implemented — window/OpenGL loop/FPS camera/ImGui foundation, event horizon, photon sphere, full Schwarzschild geodesic gravitational lensing, a physically-motivated accretion disk rendered through the same lensing pipeline, relativistic gravitational redshift + Doppler shading (beaming) of the disk, and an optional per-pixel NxN supersampling/jitter image-quality refinement layered on top of the same lensing pass, all evaluated in the same per-pixel shader pass (see `docs/ARCHITECTURE.md`). The disk, relativistic-effects layer, and supersampling/jitter are all off by default and toggled from the ImGui panel.
+
+### Milestone 8, Phase 1 — Lensing Refinement
+
+Image-quality refinement of the existing M5-M7 lensing pass, with no changes to the underlying Schwarzschild geodesic physics, RK4 integration, capture/escape logic, or disk/relativistic shading:
+
+- **Optional NxN supersampling** (1x1 to 4x4, off by default): the per-pixel ray tracer (`traceRay()` in `assets/shaders/lensing.frag`) is invoked once per subsample, each with its own fractionally-offset ray direction, and the results are averaged.
+- **Optional subpixel jitter**: stratified (jittered) sampling of each subsample's position within its grid cell, instead of always sampling at the exact cell center.
+- **Trilinear-filtered, mipmapped environment cubemap**: the baked starfield cubemap now builds a full mipmap chain and samples with `GL_LINEAR_MIPMAP_LINEAR`, reducing shimmer/aliasing on distant starfield detail.
+- **Denser default starfield** (5,000 → 10,000 points), a small independent rendering-quality adjustment.
+- New ImGui panel section ("Milestone 8: Lensing Refinement (Phase 1)") to enable supersampling, choose the grid size, and toggle jitter.
+
+All four new controls default to the pre-M8 (Milestone 7) behavior: supersampling and jitter start OFF, so `traceRay()` runs exactly once per pixel with the same center-of-pixel ray reconstruction used since Phase 3 unless a person explicitly turns supersampling on.
 
 ## Architecture
 

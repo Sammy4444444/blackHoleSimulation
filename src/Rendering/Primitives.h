@@ -24,6 +24,11 @@ namespace bhs::rendering {
     // sampling, not naive lat/long angles, to avoid polar clustering).
     // Deterministic for a given seed. Returns MeshData with empty indices —
     // there is no shared-vertex topology between disconnected points.
-    MeshData createStarfieldData(int count = 5000, float radius = 500.0f, unsigned int seed = 1337);
+    // Milestone 8, Phase 1: default point count raised from 5000 to 10000
+    // for a visibly denser sky. Independent rendering-quality tweak only --
+    // same uniform-sphere-surface sampling, same radius/seed, no change to
+    // black-hole physics or the lensing pipeline that samples this once
+    // baked into the environment cubemap.
+    MeshData createStarfieldData(int count = 10000, float radius = 500.0f, unsigned int seed = 1337);
 
 } // namespace bhs::rendering

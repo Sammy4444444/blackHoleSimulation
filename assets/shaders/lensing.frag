@@ -36,6 +36,20 @@
 // (multiple images of the far side of the disk, visible above/below the
 // shadow) rather than a flat unlensed overlay. See docs/ARCHITECTURE.md,
 // Milestone 6, for the full geometric derivation and the emission model.
+//
+// Milestone 7 adds relativistic redshift/Doppler shading on top of the M6
+// disk-crossing pipeline, off by default. At the same disk-crossing point
+// M6 already resolves (r, and the already-computed orbital-plane basis
+// n/e_r/e_phi and impact parameter b), the combined gravitational +
+// transverse-Doppler + longitudinal-Doppler redshift factor g for a
+// circular-Keplerian disk emitter observed by a static observer is folded
+// into the M6 temperature (T_obs = g * T) *before* it enters the existing
+// blackbody-color/T^4-flux/tonemap pipeline -- so color shift (redshift/
+// blueshift) and relativistic beaming (the g^4 intensity boost baked into
+// T_obs^4) both fall out of that one substitution rather than needing a
+// separate color/brightness path. See docs/ARCHITECTURE.md, Milestone 7,
+// for the full derivation, the finite-camera-distance correction, and the
+// numerical guards used near the photon sphere and inner disk edge.
 
 in vec2 vScreenUV;
 
@@ -54,6 +68,28 @@ uniform float uDiskInnerRadius;
 uniform float uDiskOuterRadius;
 uniform float uDiskReferenceTemperature;
 uniform float uDiskBrightness;
+
+// Milestone 7: relativistic redshift/Doppler shading, layered on top of the
+// Milestone 6 disk. See docs/ARCHITECTURE.md, Milestone 7.
+uniform int uRelativisticEnabled;
+// Sign of the disk's fixed world-space rotation sense relative to +Y:
+// +1.0 = prograde (co-rotating with +Y by the right-hand rule), -1.0 =
+// retrograde. Only changes which side of the disk appears blueshifted;
+// never changes M5/M6 geometry. See dopplerRedshiftFactor() below.
+uniform float uDiskRotationDirection;
+
+// Milestone 8, Phase 1: lensing refinement -- optional per-pixel NxN
+// supersampling with optional subpixel jitter/stratified sampling, layered
+// on top of the M5-M7 pipeline below without touching its physics. Both
+// are off by default (uSupersamplingEnabled == 0), in which case main()
+// takes the single-sample path -- exactly one traceRay() call with the
+// pixel-center ray already reconstructed the same way Phase 3 always did
+// -- so the default rendered image is unchanged from the M7 baseline. See
+// docs/ARCHITECTURE.md, Milestone 8, for the sampling-pattern derivation.
+uniform vec2 uResolution;          // framebuffer size in pixels; converts the NxN subpixel grid into screen-UV offsets.
+uniform int uSupersamplingEnabled; // 0 = off (default): single center sample, byte-for-byte the pre-M8 path.
+uniform int uSupersamplingGrid;    // requested NxN grid size; clamped to [1, 4] in-shader regardless of what's uploaded.
+uniform int uJitterEnabled;        // 0 = off (default): each subsample sits at its stratified cell's exact center.
 
 // Debug modes (unchanged from Phase 3, still useful for isolating pipeline
 // stages from lensing-physics correctness):
@@ -117,6 +153,29 @@ const float kEscapeRadius = 2000.0;
 const float kNoHorizonInvRs = 3.402823e38;
 
 // ---------------------------------------------------------------------
+// Milestone 7 — relativistic redshift/Doppler numerical guards
+// ---------------------------------------------------------------------
+
+// Lower bound on |1 - s*Omega*b| (the longitudinal-Doppler denominator in
+// dopplerRedshiftFactor() below). This denominator's true zero is the
+// physical (Cunningham 1975) infinite-blueshift condition for a photon
+// tangent to a co-rotating relativistic circular orbit, which real disks
+// approach arbitrarily closely near the photon sphere; clamping its
+// magnitude away from zero keeps g finite there instead of dividing by
+// (numerical) zero, at the cost of capping -- rather than eliminating --
+// the blueshift spike right at that boundary.
+const float kMinDopplerDenom = 0.05;
+
+// Hard ceiling on the redshift/Doppler factor g itself, applied after the
+// gravitational and Doppler terms (and the finite-camera correction) are
+// combined. Without this, kMinDopplerDenom's cap on the denominator alone
+// would still let g grow large enough that T_obs^4 in diskEmission()
+// could push the tonemap's exp() argument into range that some GPU
+// drivers evaluate imprecisely; capping g directly guarantees a bounded,
+// driver-independent input to the existing M6 tonemap.
+const float kMaxDopplerFactor = 8.0;
+
+// ---------------------------------------------------------------------
 // Milestone 6 — accretion disk model
 // ---------------------------------------------------------------------
 
@@ -167,6 +226,52 @@ vec3 blackbodyApprox(float tNorm) {
     return c;
 }
 
+// Milestone 7: combined gravitational + transverse-Doppler + longitudinal-
+// Doppler redshift factor g = nu_observed / nu_emitted, for a disk emitter
+// on a circular Keplerian test-particle orbit at radius r (Schwarzschild
+// equatorial plane), as measured by a *static* observer -- exact closed
+// form (Luminet 1979; Cunningham 1975):
+//
+//   g = sqrt(1 - 3M/r) / (1 - s*Omega(r)*b) / sqrt(f(r0))
+//
+// where Omega(r) = sqrt(M)/r^1.5 is the material's Keplerian angular
+// velocity, b is the photon's impact parameter (conserved along the whole
+// geodesic -- already computed once, before the RK4 loop, by the caller),
+// s = sign(dot(n, +Y)) * rotationDir encodes whether this particular ray's
+// orbital plane winds the same way as the disk's fixed world-space
+// rotation sense (co-rotating) or the opposite way (counter-rotating) --
+// necessary because n can point along +Y or -Y depending on the ray, while
+// the disk itself has one fixed rotation direction in world space -- and
+// the final 1/sqrt(f(r0)) converts the sqrt(1-3M/r) term's implicit
+// "observer at infinity" normalization to "observer at the camera's actual
+// (finite) radius r0", with f0 = 1 - Rs/r0 the same Schwarzschild lapse
+// already computed once per frame by the caller for the impact-parameter
+// formula.
+//
+// sqrt(1-3M/r) is guarded against going non-positive at/inside the photon
+// sphere (r <= 1.5*Rs) the same way the rest of this file guards radicands
+// against float noise; (1 - s*Omega*b) is guarded by kMinDopplerDenom, and
+// the whole result is clamped to kMaxDopplerFactor -- see both constants'
+// documentation above for why. Physically, both guards only matter for
+// rays passing extremely close to the photon sphere, where the true
+// (unclamped) answer diverges to infinity anyway -- capping it trades an
+// undefined/NaN pixel for a bright-but-bounded one, which is the same
+// tradeoff this file already makes for RK4 winding near b_crit.
+float dopplerRedshiftFactor(float r, float b, vec3 n, float M, float rotationDir, float invSqrtF0) {
+    float omega = sqrt(max(M, 0.0)) / pow(max(r, 1e-6), 1.5);
+
+    float s = sign(dot(n, vec3(0.0, 1.0, 0.0))) * rotationDir;
+
+    float denom = 1.0 - s * omega * b;
+    float denomMag = max(abs(denom), kMinDopplerDenom);
+    denom = (denom < 0.0) ? -denomMag : denomMag;
+
+    float grav = sqrt(max(1.0 - 3.0 * M / max(r, 1e-6), 1e-6));
+
+    float g = (grav / denom) * invSqrtF0;
+    return clamp(g, 0.0, kMaxDopplerFactor);
+}
+
 // Combines temperature -> color/brightness -> tonemapped emission. Flux is
 // scaled as T^4 (Stefan-Boltzmann law: total blackbody radiant emittance
 // scales with the fourth power of temperature), then uDiskBrightness is
@@ -174,8 +279,27 @@ vec3 blackbodyApprox(float tNorm) {
 // motivated scaling, and the result is tonemapped with a simple exponential
 // (Reinhard-family) curve so no combination of parameters can produce
 // unbounded/NaN-propagating output.
-vec3 diskEmission(float r, float innerRadius) {
+// Milestone 7 parameters (b, n, M, rotationDir, invSqrtF0, relativisticEnabled)
+// are additive: when relativisticEnabled == 0 (the default), T is used
+// unmodified and every line below is byte-for-byte what Milestone 6
+// produced, so M6's behavior is unchanged unless Milestone 7 is explicitly
+// turned on.
+vec3 diskEmission(float r, float innerRadius, float b, vec3 n, float M,
+                   float rotationDir, float invSqrtF0, int relativisticEnabled) {
     float T = diskTemperature(r, innerRadius);
+
+    if (relativisticEnabled != 0) {
+        // T -> g*T: because a blackbody spectrum is Lorentz-invariant, a
+        // redshifted/blueshifted blackbody is itself exactly a blackbody at
+        // the scaled temperature g*T (see file-header comment above and
+        // docs/ARCHITECTURE.md, Milestone 7). Substituting here means the
+        // color ramp and the T^4 flux below automatically pick up both the
+        // color shift and the relativistic beaming (g^4 intensity factor)
+        // with no separate code path.
+        float g = dopplerRedshiftFactor(r, b, n, M, rotationDir, invSqrtF0);
+        T *= g;
+    }
+
     float tNorm = T / max(uDiskReferenceTemperature, 1e-6);
     vec3 color = blackbodyApprox(clamp(tNorm, 0.0, 1.0));
     float flux = uDiskBrightness * pow(max(T, 0.0), 4.0);
@@ -183,35 +307,21 @@ vec3 diskEmission(float r, float innerRadius) {
     return vec3(1.0) - exp(-hdr); // tonemap: HDR -> stable [0,1) range
 }
 
-void main() {
-    if (uDebugMode == 1) {
-        FragColor = vec4(1.0, 0.0, 1.0, 1.0); // unmistakable magenta
-        return;
-    }
-
-    // vScreenUV in [0,1] (see lensing.vert) -> NDC in [-1,1].
-    vec2 ndc = vScreenUV * 2.0 - 1.0;
-
-    // Unproject to view space. The chosen NDC z (-1, the near plane) is
-    // arbitrary: the camera sits at the view-space origin, so the direction
-    // from the origin through any point along this pixel's ray is identical
-    // regardless of which depth is picked here -- only the direction matters.
-    vec4 viewSpace = uInvProjection * vec4(ndc, -1.0, 1.0);
-    viewSpace /= viewSpace.w;
-
-    // Rotate into world space. w = 0.0 deliberately drops uInvView's
-    // translation column: this transforms a direction, not a position, so
-    // camera position must not shift it.
-    vec3 worldDir = normalize((uInvView * vec4(viewSpace.xyz, 0.0)).xyz);
-
-    if (uDebugMode == 2) {
-        FragColor = vec4(worldDir * 0.5 + 0.5, 1.0); // [-1,1] -> [0,1] so it's visible
-        return;
-    }
-
+// ---------------------------------------------------------------------
+// Milestone 8, Phase 1 -- traceRay()
+// ---------------------------------------------------------------------
+// The complete M5 (geodesic lensing) + M6 (disk crossing) + M7
+// (relativistic shading) per-ray pipeline, refactored out of main() into a
+// standalone function of the ray direction D so it can be invoked once per
+// pixel (the default) or multiple times per pixel with different
+// subpixel-jittered directions (supersampling, see main() below) without
+// duplicating any of the physics. Every line below is unchanged from the
+// pre-M8 inline version in main() -- only its container and the
+// FragColor writes (now `return`s of the resolved color) changed. See the
+// file-header comment and docs/ARCHITECTURE.md for the physics derivation.
+vec3 traceRay(vec3 D) {
     // --- Ray reconstruction and orbital-plane setup ---------------------
     vec3 C = uCameraPos;
-    vec3 D = worldDir;
     float M = uMass;
     float Rs = uSchwarzschildRadius;
 
@@ -222,8 +332,7 @@ void main() {
     // horizon is solid geometry in the M1-M4 path) but guarded rather than
     // dividing by r0 == 0 below.
     if (r0 < 1e-6) {
-        FragColor = texture(uEnvironment, D);
-        return;
+        return texture(uEnvironment, D).rgb;
     }
 
     vec3 rhat = C / r0;
@@ -289,12 +398,19 @@ void main() {
             // in normal play (the horizon is solid M1-M4 geometry), but
             // guarded rather than taking sqrt() of a non-positive number
             // below.
-            FragColor = vec4(0.0, 0.0, 0.0, 1.0);
-            return;
+            return vec3(0.0, 0.0, 0.0);
         }
 
         // Impact parameter, from the exact Schwarzschild relation.
         float b = r0 * Dphi / sqrt(f0);
+
+        // Milestone 7: 1/sqrt(f(r0)), the finite-camera-distance correction
+        // for dopplerRedshiftFactor() (see its documentation above). f0 is
+        // already guaranteed > 0 by the guard above, and is the same for
+        // every pixel this frame (r0 depends only on camera position), so
+        // this is one extra sqrt per pixel -- cheap, and only ever read
+        // when a disk crossing is actually found below.
+        float invSqrtF0 = 1.0 / sqrt(f0);
 
         // Initial du/dphi. The radicand is exactly >= 0 analytically (it
         // reduces to (u0*sqrt(f0)*Dr/Dphi)^2, see docs/ARCHITECTURE.md) but
@@ -332,6 +448,7 @@ void main() {
         // --- Fixed-step RK4 integration of the orbit equation -----------
         //   du/dphi = v
         //   dv/dphi = 3*M*u^2 - u
+        float uPrev = u;
         for (int i = 0; i < kMaxPhiSteps; ++i) {
             vec2 s0 = vec2(u, v);
 
@@ -366,7 +483,9 @@ void main() {
 
                     if (rCross >= uDiskInnerRadius && rCross <= uDiskOuterRadius) {
                         diskHit = true;
-                        diskColor = diskEmission(rCross, uDiskInnerRadius);
+                        diskColor = diskEmission(rCross, uDiskInnerRadius, b, n, M,
+                                                  uDiskRotationDirection, invSqrtF0,
+                                                  uRelativisticEnabled);
                         break;
                     }
                     // Crossing was through the central hole (inside
@@ -383,14 +502,19 @@ void main() {
                 break;
             }
             if (u <= 1.0 / kEscapeRadius) {
+                float uTarget = 1.0 / kEscapeRadius;
+                float t = (uPrev - uTarget) / max(uPrev - u, 1e-12);
+                float phiEsc = mix(phi - kPhiStep, phi, clamp(t, 0.0, 1.0));
+                finalDir = cos(phiEsc) * e_r + sin(phiEsc) * e_phi;
                 escaped = true;
                 break;
             }
+
+            uPrev = u;
         }
 
         if (diskHit) {
-            FragColor = vec4(diskColor, 1.0);
-            return;
+            return diskColor;
         }
 
         if (!captured && !escaped) {
@@ -404,7 +528,7 @@ void main() {
             captured = true;
         }
 
-        if (!captured) {
+        if (!captured && !escaped) {
             // Final asymptotic escape direction, per the derivation in
             // docs/ARCHITECTURE.md: as r -> infinity the trajectory tangent
             // approaches cos(phi)*e_r + sin(phi)*e_phi.
@@ -416,9 +540,111 @@ void main() {
         // Black hole shadow: the event-horizon capture region reads as
         // pure black, matching the solid black horizon mesh drawn in the
         // M1-M4 path.
-        FragColor = vec4(0.0, 0.0, 0.0, 1.0);
+        return vec3(0.0, 0.0, 0.0);
+    }
+
+    return texture(uEnvironment, normalize(finalDir)).rgb;
+}
+
+// Milestone 8, Phase 1: cheap deterministic pseudo-random hash used only
+// for subpixel jitter below -- no cryptographic property needed, just
+// values that look uncorrelated from pixel to pixel and sample to sample.
+// Standard fract-of-scaled-dot-products construction (Hoskins-style);
+// output is in [0, 1).
+float hash12(vec2 p) {
+    vec3 p3 = fract(vec3(p.xyx) * 0.1031);
+    p3 += dot(p3, p3.yzx + 33.33);
+    return fract((p3.x + p3.y) * p3.z);
+}
+
+void main() {
+    if (uDebugMode == 1) {
+        FragColor = vec4(1.0, 0.0, 1.0, 1.0); // unmistakable magenta
         return;
     }
 
-    FragColor = texture(uEnvironment, normalize(finalDir));
+    // vScreenUV in [0,1] (see lensing.vert) -> NDC in [-1,1].
+    vec2 ndc = vScreenUV * 2.0 - 1.0;
+
+    // Unproject to view space. The chosen NDC z (-1, the near plane) is
+    // arbitrary: the camera sits at the view-space origin, so the direction
+    // from the origin through any point along this pixel's ray is identical
+    // regardless of which depth is picked here -- only the direction matters.
+    vec4 viewSpace = uInvProjection * vec4(ndc, -1.0, 1.0);
+    viewSpace /= viewSpace.w;
+
+    // Rotate into world space. w = 0.0 deliberately drops uInvView's
+    // translation column: this transforms a direction, not a position, so
+    // camera position must not shift it.
+    vec3 worldDir = normalize((uInvView * vec4(viewSpace.xyz, 0.0)).xyz);
+
+    if (uDebugMode == 2) {
+        FragColor = vec4(worldDir * 0.5 + 0.5, 1.0); // [-1,1] -> [0,1] so it's visible
+        return;
+    }
+
+    // --- Milestone 8, Phase 1: optional NxN supersampling ---------------
+    // gridSize == 1 (supersampling disabled, or an out-of-range/degenerate
+    // uSupersamplingGrid) takes the single-sample path: exactly one
+    // traceRay() call with the pixel-center direction already
+    // reconstructed above, which is byte-for-byte the pre-M8 M5-M7
+    // computation. This is the default (uSupersamplingEnabled == 0), so
+    // the baseline rendered image is unchanged unless a person explicitly
+    // turns supersampling on from ImGui.
+    int gridSize = (uSupersamplingEnabled != 0) ? clamp(uSupersamplingGrid, 1, 4) : 1;
+
+    if (gridSize <= 1) {
+        FragColor = vec4(traceRay(worldDir), 1.0);
+        return;
+    }
+
+    // Size of one screen pixel in vScreenUV's [0,1] space (see
+    // lensing.vert), used to place each subsample at a fractional-pixel
+    // offset from the pixel center reconstructed above.
+    vec2 pixelUV = 1.0 / max(uResolution, vec2(1.0));
+    float invGrid = 1.0 / float(gridSize);
+
+    vec3 accum = vec3(0.0);
+
+    // Stratified gridSize x gridSize subdivision of the pixel: cell
+    // (sx, sy) owns the sub-square [sx, sx+1) x [sy, sy+1) * invGrid of
+    // local [0,1) pixel space, so every subsample grid evenly partitions
+    // the pixel regardless of jitter (no two cells' samples can clump
+    // together, unlike unconstrained per-pixel random sampling).
+    for (int sy = 0; sy < gridSize; ++sy) {
+        for (int sx = 0; sx < gridSize; ++sx) {
+            vec2 cellOrigin = vec2(float(sx), float(sy)) * invGrid;
+
+            // Default: sample exactly at the cell's center.
+            vec2 localPos = cellOrigin + vec2(0.5 * invGrid);
+
+            if (uJitterEnabled != 0) {
+                // Stratified jitter: move within this sample's own cell
+                // only, so the even partition above still holds -- this is
+                // what keeps stratified jitter from degenerating into
+                // plain unstratified random sampling.
+                vec2 seed = gl_FragCoord.xy * 13.0 + vec2(float(sx) * 7.0, float(sy) * 17.0);
+                vec2 rnd = vec2(hash12(seed), hash12(seed + vec2(19.19, 7.77)));
+                localPos = cellOrigin + rnd * invGrid;
+            }
+
+            // Recenter on the pixel center (localPos in [0,1) -> offset in
+            // (-0.5, 0.5) pixels), then convert to a screen-UV offset and
+            // reconstruct that subsample's own world-space ray direction
+            // exactly the same way the pixel-center ray was reconstructed
+            // above.
+            vec2 subOffset = localPos - vec2(0.5);
+            vec2 subUV = vScreenUV + subOffset * pixelUV;
+            vec2 subNdc = subUV * 2.0 - 1.0;
+
+            vec4 subViewSpace = uInvProjection * vec4(subNdc, -1.0, 1.0);
+            subViewSpace /= subViewSpace.w;
+            vec3 subDir = normalize((uInvView * vec4(subViewSpace.xyz, 0.0)).xyz);
+
+            accum += traceRay(subDir);
+        }
+    }
+
+    // Average the gridSize*gridSize subsamples.
+    FragColor = vec4(accum * (invGrid * invGrid), 1.0);
 }
