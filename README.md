@@ -8,6 +8,10 @@ A long-term C++ project for real-time 3D visualization of black hole physics: ev
 
 Image-quality refinement of the existing M5-M7 lensing pass, with no changes to the underlying Schwarzschild geodesic physics, RK4 integration, capture/escape logic, or disk/relativistic shading:
 
+<p align="center">
+  <img src="docs/calculate.png" alt="Milestone 8 Calculation Result" width="750"/>
+</p>
+
 - **Optional NxN supersampling** (1x1 to 4x4, off by default): the per-pixel ray tracer (`traceRay()` in `assets/shaders/lensing.frag`) is invoked once per subsample, each with its own fractionally-offset ray direction, and the results are averaged.
 - **Optional subpixel jitter**: stratified (jittered) sampling of each subsample's position within its grid cell, instead of always sampling at the exact cell center.
 - **Trilinear-filtered, mipmapped environment cubemap**: the baked starfield cubemap now builds a full mipmap chain and samples with `GL_LINEAR_MIPMAP_LINEAR`, reducing shimmer/aliasing on distant starfield detail.
@@ -16,31 +20,9 @@ Image-quality refinement of the existing M5-M7 lensing pass, with no changes to 
 
 All four new controls default to the pre-M8 (Milestone 7) behavior: supersampling and jitter start OFF, so `traceRay()` runs exactly once per pixel with the same center-of-pixel ray reconstruction used since Phase 3 unless a person explicitly turns supersampling on.
 
-## MY CALCULATION
-
-![Milestone 8 Calculation Result](docs/calculate.png)
-
-
-
 ## Architecture
 
-```
-SimulationOfBlackHole/
-├── CMakeLists.txt          # Root build configuration
-├── cmake/
-│   └── Dependencies.cmake  # FetchContent: GLFW, GLM, GLAD, ImGui
-├── assets/
-│   └── shaders/            # GLSL shader sources
-└── src/
-    ├── main.cpp            # Entry point
-    ├── Core/               # Application lifecycle, window, logging, timing
-    ├── Rendering/          # OpenGL context, shaders, renderer
-    ├── Camera/             # 3D camera and input controller
-    ├── Physics/            # Physics stub (future simulation)
-    ├── UI/                 # Dear ImGui debug overlay
-    └── Assets/             # File loading utilities
-```
-
+SimulationOfBlackHole/├── CMakeLists.txt          # Root build configuration├── cmake/│   └── Dependencies.cmake  # FetchContent: GLFW, GLM, GLAD, ImGui├── assets/│   └── shaders/            # GLSL shader sources└── src/├── main.cpp            # Entry point├── Core/               # Application lifecycle, window, logging, timing├── Rendering/          # OpenGL context, shaders, renderer├── Camera/             # 3D camera and input controller├── Physics/            # Physics stub (future simulation)├── UI/                 # Dear ImGui debug overlay└── Assets/             # File loading utilities
 ### Module responsibilities
 
 | Module | Purpose |
@@ -67,24 +49,5 @@ From the project root:
 ```powershell
 cmake -S . -B build -G "Visual Studio 17 2026" -A x64
 cmake --build build --config Release
-```
-
-First configure downloads GLFW, GLM, GLAD, and Dear ImGui via CMake FetchContent (requires network).
-
-## Run
-
-```powershell
-.\build\Release\BlackHoleSimulator.exe
-```
-
-Or open `build\BlackHoleSimulator.sln` in Visual Studio 2022 and press **F5**.
-
-## Controls
-
-| Input | Action |
-|-------|--------|
-| W / A / S / D | Move forward / left / back / right |
-| Q / E | Move down / up |
-| Right mouse + drag | Look around |
-| Scroll wheel | Zoom (FOV) |
-| Esc | Quit |
+First configure downloads GLFW, GLM, GLAD, and Dear ImGui via CMake FetchContent (requires network).RunPowerShell.\build\Release\BlackHoleSimulator.exe
+Or open build\BlackHoleSimulator.sln in Visual Studio 2022 and press F5.ControlsInputActionW / A / S / DMove forward / left / back / rightQ / EMove down / upRight mouse + dragLook aroundScroll wheelZoom (FOV)EscQuit
