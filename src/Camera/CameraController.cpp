@@ -1,9 +1,9 @@
 #include "Camera/CameraController.h"
 
+#include <GLFW/glfw3.h>
+
 #include <imgui.h>
 #include <backends/imgui_impl_glfw.h>
-
-#include <GLFW/glfw3.h>
 
 #include <algorithm>
 
@@ -17,17 +17,33 @@ CameraController& CameraController::instance() {
 void CameraController::initialize(GLFWwindow* window) {
     m_window = window;
 
-    // ImGuiLayer::initialize() calls ImGui_ImplGlfw_InitForOpenGL(window, false),
-    // i.e. it deliberately does NOT let the ImGui GLFW backend install its own
-    // raw GLFW callbacks, because CameraController (initialized afterwards)
-    // needs to own cursor/mouse-button/scroll input for camera control.
-    // GLFW only allows one callback per event type, so whichever callback is
-    // installed last wins; without manual forwarding here, ImGui never
-    // receives mouse position/button/scroll events at all and every ImGui
-    // widget (including the lensing checkbox) is unclickable.
-    // We therefore forward every raw event to the ImGui GLFW backend
-    // ourselves first, then apply camera behavior only when ImGui itself
-    // doesn't want to consume the input (io.WantCaptureMouse).
+    // --- Input-routing fix ------------------------------------------------
+    // ImGuiLayer::initialize() calls ImGui_ImplGlfw_InitForOpenGL(window,
+    // false) -- install_callbacks=false -- specifically so this class can
+    // decide, per event, whether a click/scroll/key belongs to the camera
+    // or to a UI widget (this is the "ImGui --> Cam" edge already drawn in
+    // docs/ARCHITECTURE.md's layer diagram). But that also means ImGui
+    // receives NO raw GLFW events at all unless something forwards them,
+    // and until this fix nothing did: these three glfwSet*Callback calls
+    // below are the ONLY callbacks ever installed on the window (they fully
+    // replace, not chain with, anything ImGui might otherwise have
+    // registered), and none of them told ImGui a click/scroll happened. The
+    // practical symptom was every ImGui widget being permanently
+    // unclickable -- io.MouseDown[] never became true, since only a
+    // forwarded callback event can set it. mouseCallback/
+    // mouseButtonCallback/scrollCallback below now forward to ImGui first,
+    // then apply ImGui::GetIO().WantCaptureMouse to decide whether the
+    // camera should also react. Key/char events had the same gap (also
+    // never forwarded, so the ImGuiConfigFlags_NavEnableKeyboard flag
+    // ImGuiLayer sets was silently inert, e.g. Ctrl+click-to-type-a-value
+    // on a slider could never work) -- fixed the same way, by forwarding
+    // directly to ImGui's own callback (no camera-specific keyboard
+    // callback exists, since WASD movement polls glfwGetKey directly in
+    // processKeyboard() rather than using the GLFW callback system, so
+    // there is no existing logic here to preserve).
+    glfwSetKeyCallback(window, ImGui_ImplGlfw_KeyCallback);
+    glfwSetCharCallback(window, ImGui_ImplGlfw_CharCallback);
+
     glfwSetCursorPosCallback(window, mouseCallback);
     glfwSetMouseButtonCallback(window, mouseButtonCallback);
     glfwSetScrollCallback(window, scrollCallback);
@@ -41,8 +57,6 @@ void CameraController::update(float deltaTime) {
 }
 
 void CameraController::mouseCallback(GLFWwindow* window, double xpos, double ypos) {
-    // Forward first so ImGui's io.MousePos always reflects reality, even
-    // while the camera is also consuming this event.
     ImGui_ImplGlfw_CursorPosCallback(window, xpos, ypos);
 
     CameraController& self = instance();
@@ -68,19 +82,16 @@ void CameraController::mouseCallback(GLFWwindow* window, double xpos, double ypo
 }
 
 void CameraController::mouseButtonCallback(GLFWwindow* window, int button, int action, int mods) {
-    // Forward first: ImGui needs every button press/release, including
-    // clicks on the checkbox, or io.MouseDown[] never updates and
-    // ImGui::Checkbox() can never register a click.
     ImGui_ImplGlfw_MouseButtonCallback(window, button, action, mods);
 
     CameraController& self = instance();
 
     if (button == GLFW_MOUSE_BUTTON_RIGHT) {
         if (action == GLFW_PRESS) {
-            // Only start camera-look if ImGui isn't the one handling this
-            // click (e.g. the cursor is over the Debug panel). This keeps
-            // right-click-to-look from hijacking clicks meant for ImGui,
-            // without touching how rotation itself works.
+            // Don't start an orbit drag on a click that landed on an ImGui
+            // window/widget -- otherwise right-clicking the debug panel
+            // would simultaneously grab and hide the cursor out from
+            // under it.
             if (ImGui::GetIO().WantCaptureMouse) {
                 return;
             }
@@ -88,6 +99,11 @@ void CameraController::mouseButtonCallback(GLFWwindow* window, int button, int a
             self.m_firstMouse = true;
             glfwSetInputMode(window, GLFW_CURSOR, GLFW_CURSOR_DISABLED);
         } else if (action == GLFW_RELEASE) {
+            // Always process release regardless of WantCaptureMouse, so a
+            // rotation already in progress can't get stuck "on": the
+            // cursor is disabled/hidden for the duration of a rotation, so
+            // ImGui cannot meaningfully know it's "over" a window at
+            // release time anyway.
             self.m_rotating = false;
             glfwSetInputMode(window, GLFW_CURSOR, GLFW_CURSOR_NORMAL);
         }
@@ -95,12 +111,10 @@ void CameraController::mouseButtonCallback(GLFWwindow* window, int button, int a
 }
 
 void CameraController::scrollCallback(GLFWwindow* window, double xoffset, double yoffset) {
-    // Forward first so ImGui panels can be scrolled and so io.MouseWheel
-    // reflects this event.
     ImGui_ImplGlfw_ScrollCallback(window, xoffset, yoffset);
 
     if (ImGui::GetIO().WantCaptureMouse) {
-        return;
+        return; // Scrolling over the debug panel scrolls the panel, not the camera FOV.
     }
 
     CameraController& self = instance();
@@ -112,6 +126,19 @@ void CameraController::scrollCallback(GLFWwindow* window, double xoffset, double
 
 void CameraController::processKeyboard(float deltaTime) {
     if (!m_window) {
+        return;
+    }
+
+    // Same routing gap as the mouse callbacks above, but narrower: gate
+    // only on WantTextInput (true while an ImGui text field is actively
+    // being edited, e.g. after Ctrl+click on a slider to type an exact
+    // value), NOT the broader WantCaptureKeyboard. WantCaptureKeyboard is
+    // persistently true whenever ImGuiConfigFlags_NavEnableKeyboard is set
+    // (already the case here, from ImGuiLayer::initialize()) and any ImGui
+    // window has nav focus -- which, with a single always-visible Debug
+    // window, is essentially all the time. Gating on it blocked WASD
+    // entirely rather than only while actually typing into a field.
+    if (ImGui::GetIO().WantTextInput) {
         return;
     }
 

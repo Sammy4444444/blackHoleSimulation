@@ -87,6 +87,30 @@ poll events → update camera → update physics → ImGui begin
 → render scene → ImGui render → swap buffers
 ```
 
+## Input routing (ImGui / Camera)
+
+The layer diagram above draws `ImGui --> Cam`: ImGui is meant to gate
+whether a click/scroll/key goes to the camera or to a debug-panel widget.
+`ImGuiLayer::initialize()` calls `ImGui_ImplGlfw_InitForOpenGL(window,
+false)` (`install_callbacks=false`) specifically so `CameraController` can
+make that per-event decision — but until this fix, `CameraController`'s
+`glfwSet*Callback` registrations (the only ones ever installed on the
+window) never forwarded anything to ImGui at all, so no ImGui widget could
+ever be clicked, and `ImGuiConfigFlags_NavEnableKeyboard` (set in
+`ImGuiLayer::initialize()`) was inert. Fixed in `CameraController.cpp`:
+every mouse/scroll/key/char callback now forwards the raw event to the
+matching `ImGui_ImplGlfw_*Callback` first, then checks
+`ImGui::GetIO().WantCaptureMouse` before applying a click/drag/scroll to
+the camera. `processKeyboard()` (WASD) checks `WantTextInput` specifically
+rather than the broader `WantCaptureKeyboard` — `WantCaptureKeyboard` is
+persistently true whenever `NavEnableKeyboard` is set and any ImGui window
+has nav focus (true almost all the time with a single always-visible
+Debug window), which blocked WASD entirely in an earlier version of this
+fix; `WantTextInput` is only true while an ImGui text field is actively
+being edited (e.g. after Ctrl+click on a slider), which is the actual
+condition WASD needs to yield to. This is a routing fix to existing
+(pre-M6) plumbing, not new milestone functionality.
+
 ## Milestone 5: Gravitational lensing
 
 Implemented as a fullscreen fragment-shader pass (`assets/shaders/lensing.vert`
@@ -183,6 +207,234 @@ report for what could and couldn't be executed in this environment.
   0.97-1.18 across that range, tightening toward 1.0 at the largest `b`
   tested), consistent with `4M/b` being the leading-order term of a series
   that isn't exact at moderate `b`.
+
+## Milestone 6: Accretion disk
+
+Adds a physically-motivated accretion disk, rendered as part of the same
+per-pixel geodesic integration the M5 lensing pass already performs (still
+`assets/shaders/lensing.frag`) rather than as a separate pass. No new
+shader files, no new render pass, no changes to `Camera`, `Mesh`, or the
+M1-M4 path — the same architectural minimalism as M5. `PhysicsWorld` gains
+one new read-only accessor (`iscoRadius()`); `Renderer` gains disk
+state/accessors mirroring the existing `m_lensingEnabled` pattern;
+`ImGuiLayer` gains one new UI section.
+
+### Disk geometry
+
+The disk is a geometrically thin annulus lying exactly in the world-space
+equatorial plane `y = 0`, centered on the black hole (world origin), between
+`uDiskInnerRadius` and `uDiskOuterRadius`. It has no volume or vertical
+structure — a photon either crosses `y = 0` within that radial range or it
+doesn't.
+
+- **Inner radius**: defaults to the innermost stable circular orbit (ISCO),
+  `Risco = 6GM/c^2 = 3*Rs` (`PhysicsWorld::iscoRadius()`), the standard
+  physical justification (Shakura & Sunyaev 1973) for a disk's inner edge —
+  material on a circular orbit inside the ISCO is dynamically unstable and
+  plunges inward rather than persisting as disk material. Configurable
+  above that floor from the UI; `Renderer::renderLensingPass()` clamps the
+  uniform to `max(innerRadius, Rs)` defensively regardless of what the UI
+  sends.
+- **Outer radius**: defaults to `20*Rs` (an arbitrary but documented framing
+  choice, not a physical boundary — real disks don't have a sharp physical
+  outer edge in this model). Freely configurable from the UI.
+
+### Temperature model
+
+Shakura-Sunyaev-style radial temperature profile with a zero-torque inner
+boundary condition:
+
+```
+T(r) = Tref * (Rin/r)^0.75 * (1 - sqrt(Rin/r))^0.25       for r >= Rin
+```
+
+- `Tref` = `uDiskReferenceTemperature`, a free UI parameter in unitless
+  "simulation temperature" — **not** Kelvin. The real Shakura-Sunyaev
+  prefactor depends on accretion rate, viscosity (alpha), and black hole
+  mass (`Tref ~ (Mdot / M^2)^{1/4}` in physical units); none of that is
+  simulated, so `Tref` stands in for that entire physical prefactor as a
+  single tunable.
+- The `(1 - sqrt(Rin/r))^0.25` factor is the zero-torque boundary
+  condition: `T(Rin) = 0` exactly (not an arbitrary clamp), and the profile
+  rises from zero to a maximum near `r = (49/36)*Rin ~= 1.36*Rin`, where
+  `T ~= 0.488*Tref` (verified numerically, see Validation), before falling
+  off roughly as `r^-0.75` at large `r/Rin`.
+- **What this is not**: a full radiative-transfer or opacity calculation,
+  and it ignores GR corrections to the classical Newtonian derivation of
+  the profile shape (e.g. the Novikov-Thorne relativistic correction
+  factor near the ISCO is omitted). Treat it as a qualitatively correct
+  radial *shape*, not a quantitative prediction.
+
+### Emission / color model
+
+`diskEmission(r, Rin)` in `lensing.frag`:
+
+1. `T = diskTemperature(r, Rin)` (above).
+2. `flux = uDiskBrightness * T^4` — Stefan-Boltzmann scaling (total
+   blackbody radiant emittance goes as the fourth power of temperature),
+   with `uDiskBrightness` as a free artistic exposure multiplier on top,
+   not a physical constant.
+3. `color = blackbodyApprox(T / Tref)` — an approximate blackbody-inspired
+   color ramp (cool dim red -> orange -> yellow-white -> hot blue-white),
+   built from a few interpolated reference colors via `smoothstep`, **not**
+   a physically integrated Planckian-locus/CIE calculation (that needs an
+   integral against the CIE color-matching functions, out of scope for a
+   real-time per-pixel shader). The qualitative "hotter = whiter/bluer"
+   direction is preserved; exact hues are an artistic approximation.
+4. `hdr = color * flux`; final output `vec3(1) - exp(-hdr)` — a simple
+   exponential/Reinhard-family tonemap so no parameter combination
+   (including very large brightness or temperature) can produce unbounded
+   or NaN output; it asymptotically saturates toward white instead.
+
+### Geodesic disk intersection
+
+The disk is tested *inside* the existing M5 RK4 loop, not as a separate
+pass, so disk material is subject to the same gravitational lensing as the
+background starfield.
+
+**Key geometric fact**: because Schwarzschild spacetime is spherically
+symmetric, a photon's entire trajectory lies in a single fixed plane
+through the origin (the plane spanned by the M5 `e_r`/`e_phi` basis,
+established once per pixel before the RK4 loop runs). World-space position
+at any point along the path is `r*(cos(phi)*e_r + sin(phi)*e_phi)`, so its
+`y`-coordinate is `r*(cos(phi)*e_r.y + sin(phi)*e_phi.y)`. Since `r = 1/u`
+is always positive, **the sign of `y` depends only on `phi`, not `r`** —
+so tracking that sign across RK4 steps and detecting a flip is an *exact*
+(not approximate) test for "the ray just crossed the equatorial plane",
+with only the crossing radius itself linearly interpolated between the two
+straddling steps (approximation error bounded by one RK4 substep, i.e.
+within `kPhiStep = 0.02` rad of travel — the same resolution M5's
+integration already runs at).
+
+Per RK4 step, when `uDiskEnabled != 0`:
+
+1. Compute the new `y` from the just-updated `(u, phi)`.
+2. If `sign(yPrev) != sign(yCurr)` (tested as `yPrev*yCurr < 0`), a
+   crossing occurred; linearly interpolate the crossing radius `rCross`
+   between the previous and current step.
+3. If `uDiskInnerRadius <= rCross <= uDiskOuterRadius`: this is a disk hit.
+   Compute `diskEmission(rCross, uDiskInnerRadius)`, break out of the RK4
+   loop immediately, and output that color — the ray is opaque-terminated
+   at the disk, exactly like capture terminates it at the horizon.
+4. Otherwise (crossing was through the central hole or beyond the outer
+   edge): not a hit, keep integrating — the same loop iteration still runs
+   its normal capture/escape check afterward.
+
+Because a ray can wind around the black hole (the same mechanism that
+produces the photon ring in M5), it can cross the equatorial plane more
+than once before being captured or escaping. The first crossing within the
+disk's radial range always wins (the disk is opaque), but a ray whose
+*first* crossing misses the annulus (through the hole, or beyond the outer
+edge) keeps integrating and can register a hit on a later crossing — this
+is what produces the disk's characteristic lensed appearance (an image of
+the disk's far side, bent up above and below the black hole shadow),
+verified in Validation below.
+
+### Order-of-operations / occlusion correctness
+
+The disk check runs before the capture/escape check within each loop
+iteration, and `uDiskInnerRadius` is always clamped to `>= Rs`
+(`Renderer::renderLensingPass()`), so a valid disk hit can never occur at a
+radius inside the event horizon — the disk cannot appear "inside" the
+shadow. If a ray would cross the disk annulus and *later* fall into the
+horizon in a subsequent step, the disk hit is detected first (since it's
+strictly at `r >= Rin >= Rs`, i.e. strictly farther out along the same
+inward path than the horizon), so the disk correctly occludes the
+singularity behind it rather than the shadow overriding disk material in
+front of it.
+
+The near-radial closed-form branch (see M5, `crossMag < kNearRadialThreshold`)
+intentionally does **not** test disk intersection — a ray that close to
+exactly radial affects a solid angle far below one pixel at any practical
+resolution, and no `e_r`/`e_phi`/`phi` basis exists in that branch to test
+against (reintroducing one would defeat the point of that branch, which
+exists specifically to avoid the numerically unstable basis construction
+near-radial rays would otherwise require). This is a known, narrow,
+documented limitation, not an oversight.
+
+### Performance
+
+Disk logic only runs when `uDiskEnabled != 0` (a uniform, so it does not
+cause per-pixel thread divergence within a warp/wavefront — all pixels
+either run it or none do). When enabled, it adds one `1.0/u`, one
+`cos`/`sin` pair, and a handful of comparisons per RK4 step — the loop's
+existing `kMaxPhiSteps = 3000` hard cap is unchanged, so the worst-case
+per-pixel cost grows by a small constant factor, not a new unbounded cost.
+When disabled, the lensing pass is byte-for-byte the same cost as M5 (the
+`if (diskCheck)` branch is never entered since `diskCheck` is `false`).
+
+### Regression: Milestone 5
+
+With `uDiskEnabled == 0`, every new code path in `lensing.frag` is
+unreachable except the four disk uniforms being read into local shader
+inputs — the RK4 loop, capture/escape logic, near-radial branch, and final
+cubemap sampling are byte-for-byte what M5 shipped. `Renderer`,
+`PhysicsWorld`, `Camera`, `Mesh`, and the M1-M4 path in `render()` are
+untouched by this milestone (`PhysicsWorld` only gained a new accessor,
+no changed behavior in existing methods).
+
+### Validation
+
+Performed by replicating the exact disk logic (same formulas, same
+crossing-detection algorithm) in Python
+(`/home/claude/validate/validate_m6.py` in the working environment used to
+build this milestone; not part of the shipped repo, same convention as
+the M5 validation script). This is algorithmic/numerical validation, not a
+GPU/visual run — see "Runtime Status" in the final report.
+
+- **Zero-torque boundary**: `T(Rin) = 0` exactly, verified to `<1e-12`.
+- **Peak location/value**: numerically confirmed the profile's local
+  maximum sits at `r = (49/36)*Rin` with `T ~= 0.4879*Tref` (analytic
+  prediction ~0.488*Tref) — matches to 4 significant figures.
+- **Large-r falloff**: measured `T(r1)/T(r2)` ratio at `r1, r2 =
+  10^4*Rin, 2*10^4*Rin` matches the predicted `(r2/r1)^0.75` to within
+  0.1%, confirming the asymptotic power-law tail.
+- **Flat-space (M=0) intersection**: a ray from a known camera position/
+  direction run through the *same* RK4-based crossing-detection code with
+  `M=0` (which the shader also falls back to identically) lands within
+  0.005% of the closed-form analytic straight-line plane intersection —
+  confirms the crossing-detection algorithm itself, independent of the
+  curved-space integrator's own already-validated (M5) correctness.
+- **Near-radial skip**: a straight-down ray through the exact center is
+  confirmed to be skipped by the near-radial branch (no disk hit
+  reported), matching the documented limitation above.
+- **Symmetry**: two rays that are mirror images of each other through the
+  world x-axis produce identical crossing radii to 6+ significant figures,
+  confirming no directional bias was introduced by the basis construction.
+- **Curved-space (M>0) crossing + NaN safety**: a representative winding
+  ray produces a disk hit as expected under real gravitational bending; a
+  300-sample sweep of random camera positions/directions (including
+  grazing/near-photon-sphere geometries) through the full curved-space
+  disk-check logic produced zero NaN/Inf values at any RK4 step.
+- **Edge cases**: `Renderer::renderLensingPass()` clamps
+  `innerRadius >= Rs` and `outerRadius >= innerRadius + 1e-3` before the
+  values ever reach the shader; the ImGui sliders (`ImGuiLayer.cpp`) also
+  constrain their own ranges accordingly so the UI cannot produce an
+  inverted or degenerate annulus. Zero brightness produces a fully black
+  (but still hit/opaque) disk, not a rendering error. Very large
+  temperature/brightness saturate toward white via the tonemap rather than
+  overflowing.
+
+### Known limitations
+
+- Disk is geometrically thin/2D (an infinitesimally thin annulus), not a
+  volumetric or vertically-structured disk.
+- Temperature model omits accretion-rate/viscosity physics and GR
+  corrections to the classical profile shape; it is a qualitative radial
+  shape, not a quantitative Kelvin prediction (see Temperature model).
+- Color mapping is an artistic blackbody-inspired approximation, not a
+  physically integrated spectral calculation.
+- No relativistic Doppler beaming or gravitational redshift of disk
+  emission is modeled yet (`ARCHITECTURE.md`'s existing roadmap lists
+  "Relativistic effects (Doppler, redshift)" as a distinct, later,
+  planned feature — this milestone intentionally does not pull it in).
+- Near-radial rays (a solid angle far below one pixel at practical
+  resolutions) skip disk testing entirely, per the near-radial branch
+  discussion above.
+- Disk-crossing radius is linearly interpolated within one RK4 substep
+  (`kPhiStep = 0.02` rad), not resolved to arbitrary precision — visually
+  negligible at this step size, consistent with M5's own stated
+  discretization error budget.
 
 ## Dependency graph (third-party)
 

@@ -44,6 +44,37 @@ namespace bhs::rendering {
         // direction.
         unsigned int environmentMap() const { return m_environmentBaker.environmentMap(); }
 
+        // Milestone 6: accretion disk, rendered as part of the same
+        // per-pixel geodesic integration as the M5 lensing pass (see
+        // lensing.frag). Off by default, same reasoning as
+        // m_lensingEnabled -- and only meaningful while lensing itself is
+        // enabled, since the disk has no M1-M4 rendering path.
+        void setDiskEnabled(bool enabled) { m_diskEnabled = enabled; }
+        bool diskEnabled() const { return m_diskEnabled; }
+
+        // Disk inner/outer radius, in the same geometrized world units as
+        // schwarzschildRadius(). Inner defaults to PhysicsWorld::iscoRadius()
+        // at initialize() time (see .cpp) but is a free UI parameter after
+        // that, matching the milestone's requirement that both be
+        // configurable rather than hardcoded.
+        void setDiskInnerRadius(float radius) { m_diskInnerRadius = radius; }
+        float diskInnerRadius() const { return m_diskInnerRadius; }
+        void setDiskOuterRadius(float radius) { m_diskOuterRadius = radius; }
+        float diskOuterRadius() const { return m_diskOuterRadius; }
+
+        // Reference temperature T* in the Shakura-Sunyaev-style profile
+        // T(r) = T* * (Rin/r)^0.75 * (1 - sqrt(Rin/r))^0.25 (see lensing.frag
+        // and docs/ARCHITECTURE.md Milestone 6). Deliberately unitless /
+        // simulation-scale rather than Kelvin -- see documentation for why.
+        void setDiskReferenceTemperature(float t) { m_diskReferenceTemperature = t; }
+        float diskReferenceTemperature() const { return m_diskReferenceTemperature; }
+
+        // Artistic exposure multiplier applied on top of the T^4
+        // Stefan-Boltzmann-style flux scaling, before tonemapping. Purely a
+        // brightness/exposure control, not a physical quantity.
+        void setDiskBrightness(float brightness) { m_diskBrightness = brightness; }
+        float diskBrightness() const { return m_diskBrightness; }
+
     private:
         Renderer() = default;
 
@@ -83,6 +114,13 @@ namespace bhs::rendering {
         // Milestone 5, Phase 2: one-time starfield cubemap bake.
         void bakeEnvironment();
         EnvironmentBaker m_environmentBaker;
+
+        // Milestone 6: accretion disk state. See accessors above.
+        bool m_diskEnabled = false;
+        float m_diskInnerRadius = 1.0f;   // overwritten with PhysicsWorld::iscoRadius() in initialize()
+        float m_diskOuterRadius = 1.0f;   // overwritten with a multiple of Rs in initialize()
+        float m_diskReferenceTemperature = 1.0f;
+        float m_diskBrightness = 8.0f;
     };
 
 } // namespace bhs::rendering

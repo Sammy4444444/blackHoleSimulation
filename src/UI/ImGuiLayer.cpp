@@ -119,6 +119,47 @@ void ImGuiLayer::render() {
         }
     }
     ImGui::Separator();
+    ImGui::Text("Milestone 6: Accretion Disk");
+    {
+        auto& renderer = rendering::Renderer::instance();
+        bool diskEnabled = renderer.diskEnabled();
+        if (ImGui::Checkbox("Enable Accretion Disk", &diskEnabled)) {
+            renderer.setDiskEnabled(diskEnabled);
+        }
+        if (!renderer.lensingEnabled()) {
+            ImGui::TextDisabled("(has no effect until the lensing pass above is enabled)");
+        }
+
+        if (diskEnabled) {
+            // Clamp bounds: inner radius can never be dragged below the
+            // event horizon (the shader-side gate already prevents a
+            // sub-Rs disk from being visible, but keeping the slider's own
+            // range honest avoids a UI control that silently does nothing
+            // for part of its range). Outer radius is kept above the
+            // current inner radius for the same reason.
+            // schwarzschildRadius here is the same variable already computed
+            // above for the "Black Hole (read-only)" section.
+            float innerRadius = renderer.diskInnerRadius();
+            float outerRadius = renderer.diskOuterRadius();
+            float referenceTemperature = renderer.diskReferenceTemperature();
+            float brightness = renderer.diskBrightness();
+
+            if (ImGui::SliderFloat("Inner Radius", &innerRadius, schwarzschildRadius, outerRadius - 1e-3f)) {
+                renderer.setDiskInnerRadius(innerRadius);
+            }
+            if (ImGui::SliderFloat("Outer Radius", &outerRadius, innerRadius + 1e-3f, 100.0f * schwarzschildRadius)) {
+                renderer.setDiskOuterRadius(outerRadius);
+            }
+            if (ImGui::SliderFloat("Reference Temperature", &referenceTemperature, 0.05f, 5.0f)) {
+                renderer.setDiskReferenceTemperature(referenceTemperature);
+            }
+            if (ImGui::SliderFloat("Brightness", &brightness, 0.0f, 50.0f)) {
+                renderer.setDiskBrightness(brightness);
+            }
+            ImGui::TextDisabled("Inner radius defaults to the ISCO (3*Rs); temperature/brightness are unitless.");
+        }
+    }
+    ImGui::Separator();
     ImGui::Text("Controls");
     ImGui::BulletText("W/A/S/D - move");
     ImGui::BulletText("Q/E - down/up");

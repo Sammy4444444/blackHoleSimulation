@@ -55,6 +55,19 @@ namespace bhs::rendering {
         // render(). Not wired into lensing.frag yet (Phase 3).
         bakeEnvironment();
 
+        // Milestone 6: default disk extent, derived from the black hole's
+        // current physical radii rather than hardcoded absolutes, so the
+        // defaults stay sensible if mass is ever made mutable. Inner edge
+        // is the ISCO (see PhysicsWorld::iscoRadius() for the physical
+        // justification); outer edge is an arbitrary-but-documented 20*Rs,
+        // chosen only to be comfortably visible in the default camera
+        // framing -- both are free UI parameters after this point.
+        {
+            const auto& physicsWorld = physics::PhysicsWorld::instance();
+            m_diskInnerRadius = physicsWorld.iscoRadius();
+            m_diskOuterRadius = 20.0f * physicsWorld.schwarzschildRadius();
+        }
+
         m_initialized = true;
 
         Log::info("Renderer initialized.");
@@ -272,6 +285,16 @@ namespace bhs::rendering {
         const int environmentLoc = glGetUniformLocation(m_lensingShader.id(), "uEnvironment");
         const int debugModeLoc = glGetUniformLocation(m_lensingShader.id(), "uDebugMode");
 
+        // Milestone 6: accretion disk uniforms. Always set (not just when
+        // enabled) so the shader's uDiskEnabled branch is the single source
+        // of truth for whether disk logic runs -- avoids stale state if the
+        // uniform were only conditionally written.
+        const int diskEnabledLoc = glGetUniformLocation(m_lensingShader.id(), "uDiskEnabled");
+        const int diskInnerLoc = glGetUniformLocation(m_lensingShader.id(), "uDiskInnerRadius");
+        const int diskOuterLoc = glGetUniformLocation(m_lensingShader.id(), "uDiskOuterRadius");
+        const int diskTempLoc = glGetUniformLocation(m_lensingShader.id(), "uDiskReferenceTemperature");
+        const int diskBrightnessLoc = glGetUniformLocation(m_lensingShader.id(), "uDiskBrightness");
+
         // [PHASE3-DEBUG] One-shot full diagnostic dump covering checkpoints
         // C-G, logged the first frame after the toggle switches on so it
         // doesn't spam every frame at 60fps.
@@ -305,6 +328,17 @@ namespace bhs::rendering {
         // 0=normal (full geodesic lensing), 1=flat diagnostic color,
         // 2=raw world-ray-direction visualization. See lensing.frag.
         glUniform1i(debugModeLoc, m_lensingDebugMode);
+
+        // Milestone 6: accretion disk parameters. innerRadius is clamped
+        // above the event horizon defensively -- the UI slider (ImGuiLayer)
+        // already clamps this too, but the shader-side capture check would
+        // in any case prevent a sub-Rs "disk" from being visible, this just
+        // keeps the geometry itself sane.
+        glUniform1i(diskEnabledLoc, m_diskEnabled ? 1 : 0);
+        glUniform1f(diskInnerLoc, glm::max(m_diskInnerRadius, schwarzschildRadius));
+        glUniform1f(diskOuterLoc, glm::max(m_diskOuterRadius, m_diskInnerRadius + 1e-3f));
+        glUniform1f(diskTempLoc, m_diskReferenceTemperature);
+        glUniform1f(diskBrightnessLoc, m_diskBrightness);
 
         // Explicit texture unit binding: texture unit 0 is used deliberately
         // (not left implicit) and the sampler uniform is pointed at it
