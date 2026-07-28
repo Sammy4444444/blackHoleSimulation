@@ -16,6 +16,7 @@ Image-quality refinement of the existing M5-M7 lensing pass, with no changes to 
 
 All four new controls default to the pre-M8 (Milestone 7) behavior: supersampling and jitter start OFF, so `traceRay()` runs exactly once per pixel with the same center-of-pixel ray reconstruction used since Phase 3 unless a person explicitly turns supersampling on.
 
+## MY CALCULATION
 
 ![Milestone 8 Calculation Result](docs/calculate.png)
 
